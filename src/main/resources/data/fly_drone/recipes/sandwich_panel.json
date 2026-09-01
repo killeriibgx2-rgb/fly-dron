@@ -1,0 +1,15 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "PPP",
+    "   ",
+    "PPP"
+  ],
+  "key": {
+    "P": { "item": "fly_drone:iron_plate" }
+  },
+  "result": {
+    "item": "fly_drone:sandwich_panel",
+    "count": 1
+  }
+}

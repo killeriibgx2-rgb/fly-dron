@@ -1,0 +1,67 @@
+{
+	"format_version": "1.9.0",
+	"credit": "Made with Blockbench",
+	"textures": {
+		"0": "fly_drone:item/motor_shaft_texture",
+		"particle": "fly_drone:item/motor_shaft_texture"
+	},
+	"elements": [
+		{
+			"from": [7, 5.5, 7],
+			"to": [9, 10.5, 9],
+			"rotation": {"angle": 0, "axis": "y", "origin": [8, 5.5, 8]},
+			"faces": {
+				"north": {"uv": [0, 0, 2, 5], "texture": "#0"},
+				"east": {"uv": [2, 0, 4, 5], "texture": "#0"},
+				"south": {"uv": [4, 0, 6, 5], "texture": "#0"},
+				"west": {"uv": [0, 5, 2, 10], "texture": "#0"},
+				"up": {"uv": [4, 7, 2, 5], "texture": "#0"},
+				"down": {"uv": [6, 5, 4, 7], "texture": "#0"}
+			}
+		},
+		{
+			"from": [7.6, 10.5, 7.6],
+			"to": [8.4, 12.3, 8.4],
+			"rotation": {"angle": 0, "axis": "y", "origin": [8, 10.5, 8]},
+			"faces": {
+				"north": {"uv": [6, 0, 7, 2], "texture": "#0"},
+				"east": {"uv": [6, 2, 7, 4], "texture": "#0"},
+				"south": {"uv": [6, 4, 7, 6], "texture": "#0"},
+				"west": {"uv": [6, 6, 7, 8], "texture": "#0"},
+				"up": {"uv": [5, 8, 4, 7], "texture": "#0"},
+				"down": {"uv": [8, 4, 7, 5], "texture": "#0"}
+			}
+		},
+		{
+			"from": [7.6, 3.7, 7.6],
+			"to": [8.4, 5.5, 8.4],
+			"rotation": {"angle": 0, "axis": "y", "origin": [8, 3.7, 8]},
+			"faces": {
+				"north": {"uv": [7, 0, 8, 2], "texture": "#0"},
+				"east": {"uv": [2, 7, 3, 9], "texture": "#0"},
+				"south": {"uv": [7, 2, 8, 4], "texture": "#0"},
+				"west": {"uv": [3, 7, 4, 9], "texture": "#0"},
+				"up": {"uv": [6, 8, 5, 7], "texture": "#0"},
+				"down": {"uv": [8, 5, 7, 6], "texture": "#0"}
+			}
+		}
+	],
+	"display": {
+		"thirdperson_righthand": {
+			"scale": [0.5, 0.5, 0.5]
+		},
+		"thirdperson_lefthand": {
+			"scale": [0.5, 0.5, 0.5]
+		},
+		"firstperson_righthand": {
+			"scale": [0.5, 0.5, 0.5]
+		},
+		"firstperson_lefthand": {
+			"scale": [0.5, 0.5, 0.5]
+		},
+		"gui": {
+			"rotation": [17, 19, 0],
+			"scale": [1.31, 1.31, 1.31]
+		}
+	}
+}

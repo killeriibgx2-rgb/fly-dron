@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    " C ",
+    " S ",
+    " W "
+  ],
+  "key": {
+    "C": { "item": "fly_drone:motor_casing" },
+    "S": { "item": "fly_drone:motor_shaft" },
+    "W": { "item": "fly_drone:motor_winding" }
+  },
+  "result": {
+    "item": "fly_drone:motor_fpv",
+    "count": 1
+  }
+}
