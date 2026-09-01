@@ -1,6 +1,6 @@
-package com.zzynes.flydrone;
+package com.zzynes.flydrone.DRONE;
 
-import com.zzynes.flydrone.entity.FpvDroneEntity;
+import com.zzynes.flydrone.DRONE.entity.FpvDroneEntity;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.resources.ResourceLocation;

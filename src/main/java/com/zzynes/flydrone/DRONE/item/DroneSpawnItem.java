@@ -1,7 +1,7 @@
-package com.zzynes.flydrone.item;
+package com.zzynes.flydrone.DRONE.item;
 
-import com.zzynes.flydrone.entity.FpvDroneEntity;
-import com.zzynes.flydrone.init.ModEntityTypes;
+import com.zzynes.flydrone.DRONE.entity.FpvDroneEntity;
+import com.zzynes.flydrone.DRONE.init.ModEntityTypes;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.player.Player;

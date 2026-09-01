@@ -1,7 +1,7 @@
-package com.zzynes.flydrone.entity;
+package com.zzynes.flydrone.DRONE.entity;
 
 import com.mojang.blaze3d.vertex.PoseStack;
-import com.zzynes.flydrone.FpvOverlay;
+import com.zzynes.flydrone.DRONE.FpvOverlay;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.entity.EntityRendererProvider;
 import net.minecraft.network.chat.Component;

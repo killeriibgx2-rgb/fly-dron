@@ -1,4 +1,4 @@
-package com.zzynes.flydrone;
+package com.zzynes.flydrone.DRONE;
 
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.client.event.RenderGuiEvent;

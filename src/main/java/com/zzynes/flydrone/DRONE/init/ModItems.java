@@ -1,7 +1,7 @@
-package com.zzynes.flydrone.init;
+package com.zzynes.flydrone.DRONE.init;
 
-import com.zzynes.flydrone.item.DroneRemoteItem;
-import com.zzynes.flydrone.item.DroneSpawnItem;
+import com.zzynes.flydrone.DRONE.item.DroneRemoteItem;
+import com.zzynes.flydrone.DRONE.item.DroneSpawnItem;
 import net.minecraft.world.item.Item;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.registries.DeferredRegister;

@@ -1,4 +1,4 @@
-package com.zzynes.flydrone.entity;
+package com.zzynes.flydrone.DRONE.entity;
 
 import net.minecraft.resources.ResourceLocation;
 import software.bernie.geckolib.model.GeoModel;

@@ -1,7 +1,7 @@
-package com.zzynes.flydrone;
+package com.zzynes.flydrone.DRONE;
 
-import com.zzynes.flydrone.entity.FpvDroneRenderer;
-import com.zzynes.flydrone.init.ModEntityTypes;
+import com.zzynes.flydrone.DRONE.entity.FpvDroneRenderer;
+import com.zzynes.flydrone.DRONE.init.ModEntityTypes;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.client.event.EntityRenderersEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;

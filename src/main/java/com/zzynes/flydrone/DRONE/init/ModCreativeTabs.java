@@ -1,4 +1,4 @@
-package com.zzynes.flydrone.init;
+package com.zzynes.flydrone.DRONE.init;
 
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;

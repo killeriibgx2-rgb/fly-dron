@@ -1,8 +1,8 @@
-package com.zzynes.flydrone.item;
+package com.zzynes.flydrone.DRONE.item;
 
-import com.zzynes.flydrone.entity.FpvDroneEntity;
-import com.zzynes.flydrone.DroneInputHandler;
-import com.zzynes.flydrone.init.ModItems;
+import com.zzynes.flydrone.DRONE.entity.FpvDroneEntity;
+import com.zzynes.flydrone.DRONE.DroneInputHandler;
+import com.zzynes.flydrone.DRONE.init.ModItems;
 import net.minecraft.ChatFormatting;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;

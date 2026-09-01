@@ -1,4 +1,4 @@
-package com.zzynes.flydrone;
+package com.zzynes.flydrone.DRONE;
 
 import net.minecraft.resources.ResourceLocation;
 import net.minecraftforge.network.NetworkDirection;

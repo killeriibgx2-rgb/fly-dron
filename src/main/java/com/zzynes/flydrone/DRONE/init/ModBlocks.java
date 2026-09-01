@@ -1,6 +1,6 @@
-package com.zzynes.flydrone.init;
+package com.zzynes.flydrone.DRONE.init;
 
-import com.zzynes.flydrone.FlyDroneMod;
+import com.zzynes.flydrone.DRONE.FlyDroneMod;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.level.block.Block;

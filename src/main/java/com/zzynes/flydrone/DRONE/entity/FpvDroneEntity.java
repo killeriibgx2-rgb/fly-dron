@@ -1,8 +1,8 @@
-package com.zzynes.flydrone.entity;
+package com.zzynes.flydrone.DRONE.entity;
 
-import com.zzynes.flydrone.DroneDisconnectPacket;
-import com.zzynes.flydrone.ModNetwork;
-import com.zzynes.flydrone.init.ModItems;
+import com.zzynes.flydrone.DRONE.DroneDisconnectPacket;
+import com.zzynes.flydrone.DRONE.ModNetwork;
+import com.zzynes.flydrone.DRONE.init.ModItems;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.EntityDataSerializers;

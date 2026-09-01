@@ -1,6 +1,6 @@
-package com.zzynes.flydrone;
+package com.zzynes.flydrone.DRONE;
 
-import com.zzynes.flydrone.entity.FpvDroneEntity;
+import com.zzynes.flydrone.DRONE.entity.FpvDroneEntity;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.phys.AABB;
