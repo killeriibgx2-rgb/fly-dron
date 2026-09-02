@@ -1,0 +1,16 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "WWW",
+    "WSW",
+    "WWW"
+  ],
+  "key": {
+    "W": { "item": "fly_drone:copper_wire" },
+    "S": { "item": "fly_drone:motor_shaft" }
+  },
+  "result": {
+    "item": "fly_drone:motor_winding",
+    "count": 1
+  }
+}

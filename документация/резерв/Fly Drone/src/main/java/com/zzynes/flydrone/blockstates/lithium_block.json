@@ -1,0 +1,5 @@
+{
+  "variants": {
+    "": { "model": "fly_drone:block/lithium_block" }
+  }
+}

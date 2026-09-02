@@ -1,0 +1,42 @@
+{
+	"format_version": "1.9.0",
+	"credit": "Made with Blockbench",
+	"textures": {
+		"0": "fly_drone:item/propeller_fpv_texture",
+		"particle": "fly_drone:item/propeller_fpv_texture"
+	},
+	"elements": [
+		{
+			"from": [4.5, 7.5, 7.5],
+			"to": [11.5, 8.5, 8.5],
+			"rotation": {"angle": 0, "axis": "y", "origin": [8, 7.5, 8]},
+			"faces": {
+				"north": {"uv": [0, 0, 7, 1], "texture": "#0"},
+				"east": {"uv": [0, 4, 1, 5], "texture": "#0"},
+				"south": {"uv": [0, 1, 7, 2], "texture": "#0"},
+				"west": {"uv": [1, 4, 2, 5], "texture": "#0"},
+				"up": {"uv": [7, 3, 0, 2], "texture": "#0"},
+				"down": {"uv": [7, 3, 0, 4], "texture": "#0"}
+			}
+		}
+	],
+	"display": {
+		"thirdperson_righthand": {
+			"translation": [0, 0.25, 0]
+		},
+		"thirdperson_lefthand": {
+			"translation": [0, 0.5, 0]
+		},
+		"gui": {
+			"rotation": [30, -17, -36],
+			"translation": [0.25, 0.5, 0],
+			"scale": [1.99, 1.99, 1.99]
+		},
+		"fixed": {
+			"scale": [1.99, 2.46, 4]
+		},
+		"on_shelf": {
+			"scale": [1.29, 1.22, 1.9]
+		}
+	}
+}

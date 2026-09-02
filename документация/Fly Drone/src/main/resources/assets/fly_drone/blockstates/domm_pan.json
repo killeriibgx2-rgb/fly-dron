@@ -1,0 +1,8 @@
+{
+  "variants": {
+    "facing=north": { "model": "fly_drone:block/domm_pan", "y": 0 },
+    "facing=east":  { "model": "fly_drone:block/domm_pan", "y": 90 },
+    "facing=south": { "model": "fly_drone:block/domm_pan", "y": 180 },
+    "facing=west":  { "model": "fly_drone:block/domm_pan", "y": 270 }
+  }
+}

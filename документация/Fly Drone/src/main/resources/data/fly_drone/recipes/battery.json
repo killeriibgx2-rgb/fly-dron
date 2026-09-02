@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "CPC",
+    "BBB",
+    "BBB"
+  ],
+  "key": {
+    "C": { "item": "minecraft:copper_ingot" },
+    "P": { "item": "fly_drone:copper_plate" },
+    "B": { "item": "fly_drone:battery_cell" }
+  },
+  "result": {
+    "item": "fly_drone:battery",
+    "count": 1
+  }
+}

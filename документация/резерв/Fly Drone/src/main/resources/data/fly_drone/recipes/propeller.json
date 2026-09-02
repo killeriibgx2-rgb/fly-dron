@@ -1,0 +1,16 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "RRR",
+    "LLL",
+    "RRR"
+  ],
+  "key": {
+    "R": { "item": "minecraft:red_dye" },
+    "L": { "tag": "minecraft:logs" }
+  },
+  "result": {
+    "item": "fly_drone:propeller_fpv",
+    "count": 1
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "CCC",
+    "GWM",
+    "CCC"
+  ],
+  "key": {
+    "C": { "item": "minecraft:gray_concrete" },
+    "G": { "item": "minecraft:glass_pane" },
+    "W": { "item": "fly_drone:copper_wire" },
+    "M": { "item": "fly_drone:copper_plate" }
+  },
+  "result": {
+    "item": "fly_drone:camera_fpv",
+    "count": 1
+  }
+}

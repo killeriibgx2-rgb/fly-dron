@@ -1,0 +1,26 @@
+modLoader="javafml"
+loaderVersion="[47,)"
+license="All rights reserved"
+
+[[mods]]
+modId="fly_drone"
+version="0.0.1"
+displayName="Fly Drone"
+authors="Zzynes"
+description='''
+Мод на реалистичный FPV-дрон с Acro-режимом, RPG, C4 и полной физикой полёта.
+'''
+
+[[dependencies.fly_drone]]
+modId="forge"
+mandatory=true
+versionRange="[47.2.0,)"
+ordering="NONE"
+side="BOTH"
+
+[[dependencies.fly_drone]]
+modId="minecraft"
+mandatory=true
+versionRange="[1.20.1,1.20.2)"
+ordering="NONE"
+side="BOTH"

@@ -1,0 +1,11 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "ingredients": [
+    { "item": "fly_drone:lithium_ingot" },
+    { "item": "fly_drone:stal_molot" }
+  ],
+  "result": {
+    "item": "fly_drone:lithium_plate",
+    "count": 1
+  }
+}

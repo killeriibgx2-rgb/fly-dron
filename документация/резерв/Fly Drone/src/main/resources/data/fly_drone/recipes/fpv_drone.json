@@ -1,0 +1,20 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "PMP",
+    "BSM",
+    "PCP"
+  ],
+  "key": {
+    "P": { "item": "fly_drone:propeller_fpv" },
+    "M": { "item": "fly_drone:motor_fpv" },
+    "B": { "item": "fly_drone:battery" },
+    "S": { "item": "fly_drone:sandwich_panel" },
+    "C": { "item": "fly_drone:camera_fpv" },
+    "U": { "item": "fly_drone:microcontroller" }
+  },
+  "result": {
+    "item": "fly_drone:fpv_drone",
+    "count": 1
+  }
+}

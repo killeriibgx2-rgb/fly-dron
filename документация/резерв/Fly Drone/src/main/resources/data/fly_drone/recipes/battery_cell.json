@@ -1,0 +1,16 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "QQQ",
+    "LLL",
+    "QQQ"
+  ],
+  "key": {
+    "Q": { "item": "minecraft:quartz" },
+    "L": { "item": "fly_drone:lithium_plate" }
+  },
+  "result": {
+    "item": "fly_drone:battery_cell",
+    "count": 1
+  }
+}
