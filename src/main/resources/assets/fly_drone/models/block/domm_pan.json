@@ -1,0 +1,8 @@
+{
+  "parent": "minecraft:block/orientable",
+  "textures": {
+    "top": "fly_drone:block/domm_kip",
+    "front": "fly_drone:block/domm_pan",
+    "side": "fly_drone:block/domm_kip"
+  }
+}

@@ -4,6 +4,7 @@ import com.zzynes.flydrone.DRONE.init.ModBlocks;
 import com.zzynes.flydrone.DRONE.init.ModCreativeTabs;
 import com.zzynes.flydrone.DRONE.init.ModEntityTypes;
 import com.zzynes.flydrone.DRONE.init.ModItems;
+import com.zzynes.flydrone.Radio.RadioMod;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.fml.common.Mod;
@@ -21,6 +22,7 @@ public class FlyDroneMod {
         ModItems.register(modEventBus);
         ModCreativeTabs.register(modEventBus);
         ModEntityTypes.register(modEventBus);
+        RadioMod.init(modEventBus);
 
         modEventBus.addListener(this::commonSetup);
 

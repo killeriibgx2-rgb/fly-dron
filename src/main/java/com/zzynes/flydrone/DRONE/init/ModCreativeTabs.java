@@ -1,5 +1,6 @@
 package com.zzynes.flydrone.DRONE.init;
 
+import com.zzynes.flydrone.Domm.DommRegistry;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.CreativeModeTab;
@@ -39,6 +40,8 @@ public class ModCreativeTabs {
                         output.accept(ModItems.SANDWICH_PANEL.get());
                         output.accept(ModItems.FPV_DRONE_ITEM.get());
                         output.accept(ModItems.STAL_MOLOT.get());
+                        output.accept(DommRegistry.DOMM_BODY_ITEM.get());
+                        output.accept(DommRegistry.DOMM_INTERFACE_ITEM.get());
                     })
                     .build());
 
