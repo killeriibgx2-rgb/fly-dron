@@ -25,7 +25,7 @@ echo Checking the existing pip installation...
 ".venv\Scripts\python.exe" -m pip --version
 if errorlevel 1 goto :failed
 
-echo Installing the desktop app and training libraries. This may take a while.
+echo Installing the app and Qwen fine-tuning libraries. This may take a while.
 ".venv\Scripts\python.exe" -m pip install --disable-pip-version-check --timeout 120 --retries 10 -r requirements.txt
 if errorlevel 1 goto :failed
 
