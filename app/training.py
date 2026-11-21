@@ -236,6 +236,7 @@ def train_model(
             run_dir,
             source_tokenizer,
             progress_callback,
+            output_root / ".token_cache",
         )
         if vocab_size != model_config.vocab_size:
             raise ValueError(
@@ -249,6 +250,7 @@ def train_model(
             run_dir,
             config.vocab_size,
             progress_callback,
+            output_root / ".token_cache",
         )
         model_config = config.model_config(vocab_size)
 
