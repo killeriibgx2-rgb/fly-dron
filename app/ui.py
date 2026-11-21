@@ -354,7 +354,18 @@ class MainWindow(QMainWindow):
             if isinstance(option, DeviceOption) and option.key != "cpu"
         ]
         detected_gpus = self.hardware.get("gpu_names", [])
-        if supported:
+        directml_devices = [
+            option.label
+            for option in self.hardware.get("devices", [])
+            if isinstance(option, DeviceOption) and option.key.startswith("directml:")
+        ]
+        if directml_devices:
+            note = (
+                "DirectML найден: "
+                + ", ".join(directml_devices)
+                + ". Режим экспериментальный; перед обучением проверим операции."
+            )
+        elif supported:
             note = "Можно обучать на видеокарте: " + ", ".join(supported)
         elif detected_gpus and detected_gpus[0] != "Видеокарта не обнаружена системой":
             note = "Видеокарта найдена, но ускорение не подключено. Пока можно обучать на процессоре."
