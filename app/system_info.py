@@ -49,6 +49,26 @@ def _memory_info() -> tuple[int | None, int | None]:
         return None, None
 
 
+def _windows_cpu_name() -> str | None:
+    if os.name != "nt":
+        return None
+    command = "Get-CimInstance Win32_Processor | Select-Object -First 1 -ExpandProperty Name"
+    try:
+        creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", command],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+            creationflags=creation_flags,
+        )
+        name = next((line.strip() for line in result.stdout.splitlines() if line.strip()), None)
+        return name
+    except Exception:
+        return None
+
+
 def _windows_gpu_names() -> list[str]:
     if os.name != "nt":
         return []
@@ -112,7 +132,7 @@ def _torch_devices() -> tuple[list[DeviceOption], str]:
 
 def get_hardware_report() -> dict[str, object]:
     total_ram, available_ram = _memory_info()
-    cpu_name = platform.processor().strip() or platform.machine()
+    cpu_name = _windows_cpu_name() or platform.processor().strip() or platform.machine()
     logical = os.cpu_count() or 1
     try:
         import psutil

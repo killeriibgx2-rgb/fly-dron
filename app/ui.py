@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QScrollArea,
     QSpinBox,
     QTabWidget,
     QTextEdit,
@@ -41,8 +42,8 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("Мастерская модели")
-        self.resize(1060, 820)
-        self.setMinimumSize(880, 680)
+        self.resize(1280, 900)
+        self.setMinimumSize(900, 700)
         self.training_worker: TrainingWorker | None = None
         self.generation_worker: GenerationWorker | None = None
         self.hardware = get_hardware_report()
@@ -62,7 +63,7 @@ class MainWindow(QMainWindow):
         title_box.addWidget(title)
         title_box.addWidget(subtitle)
         header.addLayout(title_box, 1)
-        self.refresh_button = QPushButton("Обновить железо")
+        self.refresh_button = QPushButton("Обновить данные о ПК")
         self.refresh_button.setObjectName("secondaryButton")
         self.refresh_button.clicked.connect(self.refresh_hardware)
         header.addWidget(self.refresh_button, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
@@ -88,12 +89,20 @@ class MainWindow(QMainWindow):
         root.addWidget(self.hardware_card)
 
         self.tabs = QTabWidget()
-        self.tabs.addTab(self._build_training_tab(), "Обучение")
-        self.tabs.addTab(self._build_generation_tab(), "Проверка текста")
+        self.tabs.addTab(self._scrollable(self._build_training_tab()), "Обучение")
+        self.tabs.addTab(self._scrollable(self._build_generation_tab()), "Попробовать модель")
         root.addWidget(self.tabs, 1)
         self.statusBar().showMessage("Готово к работе")
         self.refresh_hardware()
         self._apply_style()
+
+    @staticmethod
+    def _scrollable(page: QWidget) -> QScrollArea:
+        area = QScrollArea()
+        area.setWidgetResizable(True)
+        area.setFrameShape(QFrame.Shape.NoFrame)
+        area.setWidget(page)
+        return area
 
     @staticmethod
     def _field_label(text: str) -> QLabel:
@@ -115,13 +124,13 @@ class MainWindow(QMainWindow):
         self.data_dir_edit.setReadOnly(True)
         data_row, self.data_browse_button = self._path_row(self.data_dir_edit, "Выбрать папку")
         self.data_browse_button.clicked.connect(self._choose_data_dir)
-        data_form.addRow("Папка с .txt", data_row)
+        data_form.addRow("Папка с текстами", data_row)
 
         self.output_dir_edit = QLineEdit(str(APP_ROOT / "runs"))
         self.output_dir_edit.setReadOnly(True)
         output_row, self.output_browse_button = self._path_row(self.output_dir_edit, "Куда сохранять")
         self.output_browse_button.clicked.connect(self._choose_output_dir)
-        data_form.addRow("Модели и отчёты", output_row)
+        data_form.addRow("Куда сохранять модель", output_row)
         layout.addWidget(data_group)
 
         settings_group = QGroupBox("Параметры обучения")
@@ -133,46 +142,62 @@ class MainWindow(QMainWindow):
         self.device_combo.addItem("Автоматически", "auto")
         self.device_combo.addItem("CPU", "cpu")
         self._fill_device_options()
-        self.device_combo.setToolTip("Авто выбирает доступное ускорение, иначе использует CPU.")
+        self.device_combo.setToolTip(
+            "«Автоматически» использует поддерживаемую видеокарту, если она доступна; иначе работает на CPU."
+        )
 
         self.preset_combo = QComboBox()
         self.preset_combo.addItems(["Маленькая", "Сбалансированная", "Покрупнее"])
-        self.preset_combo.setToolTip("Для первого запуска рекомендуется маленькая модель.")
+        self.preset_combo.setToolTip(
+            "Большая модель может учить больше закономерностей, но требует больше памяти и времени."
+        )
 
         self.context_combo = QComboBox()
         self.context_combo.addItems(["128", "256", "384", "512"])
         self.context_combo.setCurrentText("128")
+        self.context_combo.setToolTip(
+            "Сколько текста модель может учитывать за один раз. Большее значение требует больше памяти."
+        )
         self.batch_combo = QComboBox()
         self.batch_combo.addItems(["2", "4", "8", "16"])
         self.batch_combo.setCurrentText("4")
+        self.batch_combo.setToolTip(
+            "Сколько кусочков текста обрабатывается вместе за один шаг. Если памяти мало — выбери 2 или 4."
+        )
         self.vocab_combo = QComboBox()
         self.vocab_combo.addItems(["2048", "4096", "8192"])
         self.vocab_combo.setCurrentText("2048")
+        self.vocab_combo.setToolTip(
+            "Сколько частей слов модель будет различать. Для первого запуска оставь 2048."
+        )
 
         self.epochs_spin = QSpinBox()
         self.epochs_spin.setRange(1, 100)
         self.epochs_spin.setValue(2)
         self.epochs_spin.setSuffix(" эпох")
+        self.epochs_spin.setToolTip("Сколько раз модель перечитает весь набор текстов.")
         self.threads_spin = QSpinBox()
         self.threads_spin.setRange(1, max(1, int(self.hardware.get("logical_cores", 1))))
         self.threads_spin.setValue(min(6, max(1, int(self.hardware.get("logical_cores", 1)))))
         self.threads_spin.setSuffix(" потоков")
+        self.threads_spin.setToolTip("Больше потоков может ускорить CPU, но оставит меньше ресурсов другим программам.")
 
-        self._add_setting(grid, 0, 0, "Устройство", self.device_combo)
+        self._add_setting(grid, 0, 0, "Где считать", self.device_combo)
         self._add_setting(grid, 0, 1, "Размер модели", self.preset_combo)
-        self._add_setting(grid, 1, 0, "Контекст", self.context_combo)
-        self._add_setting(grid, 1, 1, "Пакет примеров", self.batch_combo)
-        self._add_setting(grid, 2, 0, "Словарь токенов", self.vocab_combo)
-        self._add_setting(grid, 2, 1, "Процессор", self.threads_spin)
-        self._add_setting(grid, 3, 0, "Проходы по данным", self.epochs_spin)
-        memory_hint = QLabel("Память регулируется размером модели, контекстом и пакетом.")
+        self._add_setting(grid, 1, 0, "Сколько текста видеть за раз", self.context_combo)
+        self._add_setting(grid, 1, 1, "Примеров за один шаг", self.batch_combo)
+        self._add_setting(grid, 2, 0, "Размер словаря", self.vocab_combo)
+        self._add_setting(grid, 2, 1, "Потоков процессора", self.threads_spin)
+        self._add_setting(grid, 3, 0, "Сколько раз перечитать тексты", self.epochs_spin)
+        memory_hint = QLabel("Если не хватает памяти, уменьши модель, контекст или число примеров.")
         memory_hint.setObjectName("hint")
         grid.addWidget(memory_hint, 3, 1)
         layout.addWidget(settings_group)
 
         info = QLabel(
-            "Учебная модель с нуля может генерировать ошибки и повторять текст. "
-            "Для начала используй небольшие .txt-файлы и модель «Маленькая»."
+            "Для первого запуска выбери папку с .txt и оставь модель «Маленькая». "
+            "Сейчас ИИ учится продолжать текст; понимать просьбы и команды будем учить позже. "
+            "Сначала он может ошибаться и повторяться — это нормально."
         )
         info.setObjectName("notice")
         info.setWordWrap(True)
@@ -185,8 +210,11 @@ class MainWindow(QMainWindow):
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
         self.progress_bar.setFormat("%p%")
-        self.progress_details = QLabel("Эпоха — · шаг — · ошибка —")
+        self.progress_details = QLabel("Проход — · шаг — · показатель ошибки —")
         self.progress_details.setObjectName("hint")
+        self.progress_details.setToolTip(
+            "Показатель ошибки обычно снижается по мере обучения. Сам по себе он не гарантирует, что модель хорошо разговаривает."
+        )
         progress_layout.addWidget(self.progress_stage)
         progress_layout.addWidget(self.progress_bar)
         progress_layout.addWidget(self.progress_details)
@@ -227,10 +255,10 @@ class MainWindow(QMainWindow):
             self.checkpoint_edit, "Выбрать модель"
         )
         self.checkpoint_browse_button.clicked.connect(self._choose_checkpoint)
-        checkpoint_form.addRow("Контрольная точка", checkpoint_row)
+        checkpoint_form.addRow("Файл модели", checkpoint_row)
         layout.addWidget(checkpoint_group)
 
-        prompt_group = QGroupBox("Проверить генерацию")
+        prompt_group = QGroupBox("Напиши начало фразы для модели")
         prompt_layout = QVBoxLayout(prompt_group)
         self.prompt_edit = QTextEdit()
         self.prompt_edit.setPlaceholderText("Напиши начало текста — модель попробует его продолжить…")
@@ -238,10 +266,11 @@ class MainWindow(QMainWindow):
         prompt_layout.addWidget(self.prompt_edit)
 
         options = QHBoxLayout()
-        options.addWidget(QLabel("Новых токенов"))
+        options.addWidget(QLabel("Длина ответа"))
         self.generation_length = QSpinBox()
         self.generation_length.setRange(8, 512)
         self.generation_length.setValue(96)
+        self.generation_length.setToolTip("Сколько частей текста модель добавит к твоему началу фразы.")
         options.addWidget(self.generation_length)
         options.addSpacing(14)
         options.addWidget(QLabel("Случайность"))
@@ -315,16 +344,20 @@ class MainWindow(QMainWindow):
             f"{format_bytes(self.hardware['available_ram'])} доступно / "
             f"{format_bytes(self.hardware['total_ram'])} всего")
         self.gpu_label.setText("; ".join(self.hardware["gpu_names"]))
-        note = str(self.hardware.get("backend_note", ""))
         supported = [
             option.label
             for option in self.hardware.get("devices", [])
             if isinstance(option, DeviceOption) and option.key != "cpu"
         ]
+        detected_gpus = self.hardware.get("gpu_names", [])
         if supported:
-            note = "Доступное ускорение: " + ", ".join(supported)
-        elif not note:
-            note = "GPU будет доступна только если её поддерживает установленный PyTorch-бэкенд."
+            note = "Можно обучать на видеокарте: " + ", ".join(supported)
+        elif detected_gpus and detected_gpus[0] != "Видеокарта не обнаружена системой":
+            note = "Видеокарта найдена, но ускорение не подключено. Пока можно обучать на процессоре."
+        elif self.hardware.get("backend_note"):
+            note = "Не удалось проверить видеокарту. Процессор доступен для обучения."
+        else:
+            note = "Для первого запуска оставь «Автоматически» — программа выберет доступный вариант."
         self.backend_label.setText(note)
         if hasattr(self, "device_combo"):
             self._fill_device_options()
@@ -350,7 +383,7 @@ class MainWindow(QMainWindow):
         current = self.checkpoint_edit.text() or str(APP_ROOT / "runs")
         filename, _ = QFileDialog.getOpenFileName(
             self,
-            "Выбери контрольную точку модели",
+            "Выбери файл обученной модели",
             current,
             "Файл модели (*.pt)",
         )
@@ -408,7 +441,7 @@ class MainWindow(QMainWindow):
         self.stop_button.setEnabled(True)
         self.progress_bar.setValue(0)
         self.progress_stage.setText("Подготовка…")
-        self.progress_details.setText("Эпоха — · шаг — · ошибка —")
+        self.progress_details.setText("Проход — · шаг — · показатель ошибки —")
         self._append_log("— Запуск нового обучения —")
         self.statusBar().showMessage("Обучение запущено")
         self.training_worker.start()
@@ -429,19 +462,21 @@ class MainWindow(QMainWindow):
         steps = data.get("steps_per_epoch", data.get("total_steps", "—"))
         loss = data.get("train_loss")
         loss_text = f"{float(loss):.4f}" if isinstance(loss, (int, float)) else "—"
-        self.progress_details.setText(f"Эпоха {epoch}/{epochs} · шаг {step}/{steps} · ошибка {loss_text}")
+        self.progress_details.setText(
+            f"Проход {epoch}/{epochs} · шаг {step}/{steps} · показатель ошибки {loss_text}"
+        )
 
     def _on_training_complete(self, path: str) -> None:
         self.checkpoint_edit.setText(path)
         stopped = self.progress_stage.text() == "Остановлено"
         if stopped:
             self.statusBar().showMessage("Обучение остановлено; контрольная точка сохранена")
-            self._append_log("Сохранённую контрольную точку можно выбрать во вкладке «Проверка текста».")
+            self._append_log("Сохранённую модель можно выбрать во вкладке «Попробовать модель».")
         else:
             self.progress_bar.setValue(100)
             self.statusBar().showMessage("Обучение завершено; контрольная точка сохранена")
             self._append_log(
-                "Модель готова. Перейди во вкладку «Проверка текста», чтобы попробовать генерацию."
+                "Модель готова. Перейди во вкладку «Попробовать модель», чтобы проверить её."
             )
 
     def _on_training_error(self, error: str) -> None:
@@ -491,20 +526,21 @@ class MainWindow(QMainWindow):
         self.generation_worker = None
 
     def _apply_style(self) -> None:
-        self.setFont(QFont("Segoe UI", 10))
+        self.setFont(QFont("Segoe UI", 11))
         self.setStyleSheet(
             """
             QMainWindow, QWidget { background: #f3f7f5; color: #23352f; }
             QLabel#title { color: #1d4e45; font-size: 25px; font-weight: 700; }
-            QLabel#subtitle { color: #687b74; font-size: 12px; }
+            QWidget { font-size: 13px; }
+            QLabel#subtitle { color: #687b74; font-size: 14px; }
             QFrame#hardwareCard { background: #e3f0eb; border: 1px solid #c9dfd6; border-radius: 12px; }
-            QLabel#fieldLabel { color: #688078; font-size: 10px; font-weight: 700; letter-spacing: 1px; }
-            QLabel#hint { color: #687b74; font-size: 11px; }
-            QGroupBox { background: #ffffff; border: 1px solid #d8e4df; border-radius: 11px; margin-top: 12px; padding: 12px; font-weight: 600; color: #315d52; }
+            QLabel#fieldLabel { color: #688078; font-size: 12px; font-weight: 700; letter-spacing: 0.5px; }
+            QLabel#hint { color: #526b62; font-size: 13px; }
+            QGroupBox { background: #ffffff; border: 1px solid #d8e4df; border-radius: 11px; margin-top: 14px; padding: 14px; font-size: 15px; font-weight: 600; color: #315d52; }
             QGroupBox::title { subcontrol-origin: margin; left: 12px; padding: 0 6px; }
-            QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QTextEdit { background: #fbfdfc; border: 1px solid #d6e2dd; border-radius: 7px; padding: 7px 9px; selection-background-color: #69a994; }
+            QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QTextEdit { background: #fbfdfc; border: 1px solid #d6e2dd; border-radius: 7px; padding: 8px 10px; min-height: 36px; font-size: 13px; selection-background-color: #69a994; }
             QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus, QTextEdit:focus { border: 1px solid #69a994; }
-            QPushButton { background: #e6efeb; color: #31564d; border: 1px solid #cfddd7; border-radius: 8px; padding: 8px 13px; font-weight: 600; }
+            QPushButton { background: #e6efeb; color: #31564d; border: 1px solid #cfddd7; border-radius: 8px; padding: 10px 15px; min-height: 38px; font-size: 13px; font-weight: 600; }
             QPushButton:hover { background: #dbeae4; }
             QPushButton:disabled { background: #edf1ef; color: #9aa9a3; border-color: #e1e7e4; }
             QPushButton#primaryButton { background: #438c78; color: white; border: none; padding: 10px 18px; }
@@ -515,7 +551,7 @@ class MainWindow(QMainWindow):
             QProgressBar { border: 1px solid #d5e1dc; border-radius: 7px; background: #edf2ef; height: 20px; text-align: center; color: #284b41; }
             QProgressBar::chunk { background: #69a994; border-radius: 6px; }
             QTabWidget::pane { border: 1px solid #d8e4df; background: #f3f7f5; border-radius: 9px; }
-            QTabBar::tab { background: #e6eeea; color: #60756d; padding: 9px 18px; border-top-left-radius: 8px; border-top-right-radius: 8px; margin-right: 4px; }
+            QTabBar::tab { background: #e6eeea; color: #60756d; padding: 11px 20px; font-size: 14px; border-top-left-radius: 8px; border-top-right-radius: 8px; margin-right: 4px; }
             QTabBar::tab:selected { background: #438c78; color: white; }
             QStatusBar { color: #657970; }
             """
@@ -527,5 +563,5 @@ def run_app() -> int:
     app.setApplicationName("Мастерская модели")
     app.setOrganizationName("FlyDron")
     window = MainWindow()
-    window.show()
+    window.showMaximized()
     return app.exec()
