@@ -14,7 +14,11 @@ import torch
 from torch.nn import functional as F
 
 from app.config import TrainingConfig
-from app.data import discover_text_files, prepare_token_data
+from app.data import (
+    discover_text_files,
+    encode_with_existing_tokenizer,
+    prepare_token_data,
+)
 from app.model import ModelConfig, TinyLanguageModel
 
 ProgressCallback = Callable[[dict[str, object]], None]
@@ -140,8 +144,20 @@ def train_model(
         raise ValueError("Число эпох должно быть не меньше 1.")
     if config.batch_size < 1:
         raise ValueError("Размер батча должен быть не меньше 1.")
+    if not 1 <= config.validation_percent <= 30:
+        raise ValueError("Доля проверки должна быть от 1 до 30 процентов.")
+    if config.optimizer not in {"AdamW", "Adam"}:
+        raise ValueError("Выбери поддерживаемый оптимизатор: AdamW или Adam.")
     if config.context_length < 16:
         raise ValueError("Контекст должен быть не меньше 16 токенов.")
+    if config.learning_rate <= 0:
+        raise ValueError("Скорость обучения должна быть больше нуля.")
+    if config.weight_decay < 0:
+        raise ValueError("Снижение весов не может быть отрицательным.")
+    if config.gradient_clip < 0:
+        raise ValueError("Ограничение градиента не может быть отрицательным.")
+    if not 0 <= config.dropout < 1:
+        raise ValueError("Dropout должен быть от 0 до 1, не включая 1.")
 
     try:
         torch.set_num_threads(max(1, int(config.cpu_threads)))
@@ -150,9 +166,23 @@ def train_model(
     torch.manual_seed(config.seed)
     np.random.seed(config.seed)
 
-    run_name = datetime.now().strftime("run_%Y%m%d_%H%M%S")
-    run_dir = config.output_dir.expanduser().resolve() / run_name
-    run_dir.mkdir(parents=True, exist_ok=True)
+    output_root = config.output_dir.expanduser().resolve()
+    source_dir = config.continue_from.expanduser().resolve() if config.continue_from else None
+    if source_dir is not None and (output_root == source_dir or source_dir in output_root.parents):
+        raise ValueError("Папка результата должна быть вне исходной папки модели.")
+    output_root.mkdir(parents=True, exist_ok=True)
+    run_base = datetime.now().strftime("run_%Y%m%d_%H%M%S")
+    run_dir = output_root / run_base
+    suffix = 1
+    while True:
+        try:
+            run_dir.mkdir()
+            break
+        except FileExistsError:
+            suffix += 1
+            run_dir = output_root / f"{run_base}_{suffix}"
+    if source_dir is not None and run_dir == source_dir:
+        raise ValueError("Новая папка результата совпала с исходной папкой модели.")
     on_message(f"Создана папка запуска: {run_dir}")
 
     files = discover_text_files(config.data_dir, config.output_dir)
@@ -161,40 +191,87 @@ def train_model(
     total_bytes = sum(path.stat().st_size for path in files)
     on_message(f"Найдено файлов: {len(files)}; размер текста: {total_bytes / (1024 * 1024):.1f} МБ.")
 
-    tokenizer_path, token_cache_path, token_count, vocab_size = prepare_token_data(
-        files,
-        run_dir,
-        config.vocab_size,
-        lambda text, current, total: on_progress(
-            {
-                "stage": "Подготовка текста",
-                "message": text,
-                "stage_current": current,
-                "stage_total": total,
-                "percent": 0,
-            }
-        ),
+    progress_callback = lambda text, current, total: on_progress(
+        {
+            "stage": "Подготовка текста",
+            "message": text,
+            "stage_current": current,
+            "stage_total": total,
+            "percent": 0,
+        }
     )
-    if token_count < 2 * config.context_length + 2:
+    checkpoint_payload: dict[str, object] | None = None
+    pretrained_state: dict[str, torch.Tensor] | None = None
+
+    if config.continue_from is not None:
+        source_dir = config.continue_from.expanduser().resolve()
+        source_checkpoint = source_dir / "latest.pt"
+        source_tokenizer = source_dir / "tokenizer.json"
+        if not source_checkpoint.is_file():
+            raise FileNotFoundError(f"В выбранной папке не найден latest.pt: {source_dir}")
+        on_message(f"Загружаю модель из папки: {source_dir}")
+        try:
+            loaded = torch.load(source_checkpoint, map_location="cpu", weights_only=True)
+        except Exception as exc:
+            raise RuntimeError(f"Не удалось открыть файл модели: {exc}") from exc
+        if not isinstance(loaded, dict):
+            raise ValueError("Файл latest.pt имеет неподдерживаемый формат.")
+        checkpoint_payload = loaded
+        saved_model_config = checkpoint_payload.get("model_config")
+        saved_state = checkpoint_payload.get("model_state")
+        if not isinstance(saved_model_config, dict) or not isinstance(saved_state, dict):
+            raise ValueError("В выбранной папке нет настроек или весов модели.")
+        model_config = ModelConfig(**saved_model_config)
+        pretrained_state = saved_state
+        if not source_tokenizer.is_file():
+            stored_tokenizer = checkpoint_payload.get("tokenizer_path")
+            if isinstance(stored_tokenizer, str) and Path(stored_tokenizer).is_file():
+                source_tokenizer = Path(stored_tokenizer)
+            else:
+                raise FileNotFoundError(
+                    "Рядом с моделью не найден tokenizer.json. Выбери исходную папку запуска."
+                )
+        tokenizer_path, token_cache_path, token_count, vocab_size = encode_with_existing_tokenizer(
+            files,
+            run_dir,
+            source_tokenizer,
+            progress_callback,
+        )
+        if vocab_size != model_config.vocab_size:
+            raise ValueError(
+                "Размер словаря в папке модели не совпадает с настройками модели. "
+                "Выбери папку исходного запуска."
+            )
+        on_message("Словарь модели сохранён; обучение продолжится с прежних весов.")
+    else:
+        tokenizer_path, token_cache_path, token_count, vocab_size = prepare_token_data(
+            files,
+            run_dir,
+            config.vocab_size,
+            progress_callback,
+        )
+        model_config = config.model_config(vocab_size)
+
+    model_context = model_config.context_length
+    if token_count < 2 * model_context + 2:
         raise ValueError(
-            f"После токенизации получилось только {token_count} токенов. "
-            f"Для контекста {config.context_length} нужно больше текста; добавь файлы или уменьши контекст."
+            f"После подготовки получилось только {token_count} токенов. "
+            f"Для контекста {model_context} нужно больше текста; добавь файлы или уменьши контекст."
         )
     on_message(f"Подготовлено токенов: {token_count:,}; размер словаря: {vocab_size:,}.")
 
     tokens = np.memmap(token_cache_path, dtype=np.uint16, mode="r")
-    split = int(token_count * 0.95)
-    split = min(max(split, config.context_length + 1), token_count - config.context_length - 1)
+    split = int(token_count * (100 - config.validation_percent) / 100)
+    split = min(max(split, model_context + 1), token_count - model_context - 1)
     train_length = split
     validation_start = split
     validation_length = token_count - split
-    if validation_length <= config.context_length:
+    if validation_length <= model_context:
         validation_start = 0
         validation_length = train_length
         on_message("Текста для отдельной проверки мало: временно проверяю на обучающей части.")
 
-    block_size = min(config.context_length, train_length - 1)
-    model_config = config.model_config(vocab_size)
+    block_size = min(model_context, train_length - 1)
     if block_size < 16:
         raise ValueError("Недостаточно текста для обучения; добавь больше .txt-файлов.")
     device = resolve_device(config.device)
@@ -211,8 +288,25 @@ def train_model(
             )
             device = torch.device("cpu")
     on_message(f"Устройство обучения: {device}.")
-    model = TinyLanguageModel(model_config).to(device)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate)
+    model = TinyLanguageModel(model_config)
+    if pretrained_state is not None:
+        model.load_state_dict(pretrained_state)
+        on_message("Веса сохранённой модели загружены.")
+        on_message(
+            "Состояние optimizer в checkpoint не восстанавливается: веса сохранены, но optimizer начнёт работу заново; "
+            "это не точное восстановление прерванного шага."
+        )
+    model = model.to(device)
+    on_message(
+        f"Настройки: скорость обучения {config.learning_rate:g}, dropout {model_config.dropout:g}, "
+        f"ограничение градиента {config.gradient_clip:g} (0 — выключено)."
+    )
+    optimizer_type = torch.optim.AdamW if config.optimizer == "AdamW" else torch.optim.Adam
+    optimizer = optimizer_type(
+        model.parameters(),
+        lr=config.learning_rate,
+        weight_decay=config.weight_decay,
+    )
 
     starts = _make_starts(train_length, block_size)
     if len(starts) == 0:
@@ -245,7 +339,8 @@ def train_model(
             logits = model(inputs)
             loss = F.cross_entropy(logits.reshape(-1, vocab_size), targets.reshape(-1))
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            if config.gradient_clip > 0:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), config.gradient_clip)
             optimizer.step()
 
             last_loss = float(loss.item())

@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSignalBlocker, Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QApplication,
@@ -32,8 +32,9 @@ from PySide6.QtWidgets import (
 )
 
 from app.config import TrainingConfig
+from app.model import preset_values
 from app.system_info import DeviceOption, format_bytes, get_hardware_report
-from app.workers import GenerationWorker, TrainingWorker
+from app.workers import GenerationWorker, ModelControlWorker, TrainingWorker
 
 APP_ROOT = Path(__file__).resolve().parent.parent
 
@@ -46,6 +47,7 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(900, 700)
         self.training_worker: TrainingWorker | None = None
         self.generation_worker: GenerationWorker | None = None
+        self.model_control_worker: ModelControlWorker | None = None
         self.hardware = get_hardware_report()
 
         central = QWidget()
@@ -133,6 +135,25 @@ class MainWindow(QMainWindow):
         data_form.addRow("Куда сохранять модель", output_row)
         layout.addWidget(data_group)
 
+        continue_group = QGroupBox("Продолжить сохранённую модель")
+        continue_form = QFormLayout(continue_group)
+        self.model_dir_edit = QLineEdit()
+        self.model_dir_edit.setReadOnly(True)
+        self.model_dir_edit.setPlaceholderText("Выбери папку запуска из runs")
+        model_row, self.model_browse_button = self._path_row(
+            self.model_dir_edit, "Выбрать папку модели"
+        )
+        self.model_browse_button.clicked.connect(self._choose_model_dir)
+        continue_form.addRow("Папка модели", model_row)
+        continue_hint = QLabel(
+            "Архитектура, контекст, dropout и словарь возьмутся из этой модели; настройки этих параметров ниже при продолжении не применяются. "
+            "Папка с текстами выше должна содержать старые и новые файлы."
+        )
+        continue_hint.setObjectName("hint")
+        continue_hint.setWordWrap(True)
+        continue_form.addRow(continue_hint)
+        layout.addWidget(continue_group)
+
         settings_group = QGroupBox("Параметры обучения")
         grid = QGridLayout(settings_group)
         grid.setHorizontalSpacing(16)
@@ -147,57 +168,140 @@ class MainWindow(QMainWindow):
         )
 
         self.preset_combo = QComboBox()
-        self.preset_combo.addItems(["Маленькая", "Сбалансированная", "Покрупнее"])
+        self.preset_combo.addItems(
+            [
+                "Маленькая",
+                "Сбалансированная",
+                "Покрупнее",
+                "Большая",
+                "Очень большая",
+                "Максимальная",
+                "Своя",
+            ]
+        )
         self.preset_combo.setToolTip(
-            "Большая модель может учить больше закономерностей, но требует больше памяти и времени."
+            "Выбор пресета выставляет размер трансформера ниже. Варианты «Большая» и выше требуют значительно больше памяти."
         )
 
-        self.context_combo = QComboBox()
-        self.context_combo.addItems(["128", "256", "384", "512"])
-        self.context_combo.setCurrentText("128")
-        self.context_combo.setToolTip(
-            "Сколько текста модель может учитывать за один раз. Большее значение требует больше памяти."
+        self.embedding_spin = QSpinBox()
+        self.embedding_spin.setRange(64, 2048)
+        self.embedding_spin.setSingleStep(32)
+        self.embedding_spin.setValue(128)
+        self.embedding_spin.setToolTip("Ширина скрытых представлений модели. Больше — больше параметров и расход VRAM.")
+        self.layers_spin = QSpinBox()
+        self.layers_spin.setRange(1, 48)
+        self.layers_spin.setValue(2)
+        self.layers_spin.setToolTip("Количество блоков трансформера. Больше блоков увеличивает объём вычислений и памяти.")
+        self.heads_spin = QSpinBox()
+        self.heads_spin.setRange(1, 32)
+        self.heads_spin.setValue(4)
+        self.heads_spin.setToolTip("Число голов внимания. Размер embedding должен делиться на это число.")
+
+        self.context_spin = QSpinBox()
+        self.context_spin.setRange(16, 4096)
+        self.context_spin.setSingleStep(16)
+        self.context_spin.setValue(128)
+        self.context_spin.setToolTip(
+            "Максимальная длина контекста. Внимание требует намного больше памяти при увеличении контекста."
         )
-        self.batch_combo = QComboBox()
-        self.batch_combo.addItems(["2", "4", "8", "16"])
-        self.batch_combo.setCurrentText("4")
-        self.batch_combo.setToolTip(
-            "Сколько кусочков текста обрабатывается вместе за один шаг. Если памяти мало — выбери 2 или 4."
+        self.batch_spin = QSpinBox()
+        self.batch_spin.setRange(1, 256)
+        self.batch_spin.setValue(4)
+        self.batch_spin.setToolTip(
+            "Сколько примеров обрабатывать одновременно. Больший пакет может ускорить GPU, но заметно увеличивает расход VRAM."
         )
-        self.vocab_combo = QComboBox()
-        self.vocab_combo.addItems(["2048", "4096", "8192"])
-        self.vocab_combo.setCurrentText("2048")
-        self.vocab_combo.setToolTip(
-            "Сколько частей слов модель будет различать. Для первого запуска оставь 2048."
+        self.vocab_spin = QSpinBox()
+        self.vocab_spin.setRange(256, 65000)
+        self.vocab_spin.setSingleStep(256)
+        self.vocab_spin.setValue(2048)
+        self.vocab_spin.setToolTip(
+            "Максимальный размер словаря токенизатора. Больше — больше токенов различается, но увеличиваются модель и расход памяти."
         )
 
         self.epochs_spin = QSpinBox()
-        self.epochs_spin.setRange(1, 100)
+        self.epochs_spin.setRange(1, 10_000)
         self.epochs_spin.setValue(2)
         self.epochs_spin.setSuffix(" эпох")
-        self.epochs_spin.setToolTip("Сколько раз модель перечитает весь набор текстов.")
+        self.epochs_spin.setToolTip(
+            "Одна эпоха — полный проход по обучающим текстам. До 10 000 для долгих запусков; это может занять очень много времени и привести к переобучению."
+        )
         self.threads_spin = QSpinBox()
         self.threads_spin.setRange(1, max(1, int(self.hardware.get("logical_cores", 1))))
         self.threads_spin.setValue(min(6, max(1, int(self.hardware.get("logical_cores", 1)))))
         self.threads_spin.setSuffix(" потоков")
-        self.threads_spin.setToolTip("Больше потоков может ускорить CPU, но оставит меньше ресурсов другим программам.")
+        self.threads_spin.setToolTip("Число потоков CPU. Больше не всегда быстрее и может сильнее занять компьютер.")
 
+        self.learning_rate_spin = QDoubleSpinBox()
+        self.learning_rate_spin.setDecimals(6)
+        self.learning_rate_spin.setRange(0.000001, 0.01)
+        self.learning_rate_spin.setSingleStep(0.00005)
+        self.learning_rate_spin.setValue(0.0003)
+        self.learning_rate_spin.setToolTip(
+            "Скорость изменения весов. Слишком высокая может испортить обучение; для дообучения обычно выбирают меньшую."
+        )
+        self.weight_decay_spin = QDoubleSpinBox()
+        self.weight_decay_spin.setDecimals(4)
+        self.weight_decay_spin.setRange(0.0, 0.5)
+        self.weight_decay_spin.setSingleStep(0.005)
+        self.weight_decay_spin.setValue(0.01)
+        self.weight_decay_spin.setToolTip("Регуляризация AdamW: помогает сдерживать слишком большие веса.")
+        self.dropout_spin = QDoubleSpinBox()
+        self.dropout_spin.setDecimals(2)
+        self.dropout_spin.setRange(0.0, 0.8)
+        self.dropout_spin.setSingleStep(0.05)
+        self.dropout_spin.setValue(0.1)
+        self.dropout_spin.setToolTip("Доля случайно выключаемых связей при обучении; помогает уменьшить переобучение.")
+        self.gradient_clip_spin = QDoubleSpinBox()
+        self.gradient_clip_spin.setDecimals(1)
+        self.gradient_clip_spin.setRange(0.0, 10.0)
+        self.gradient_clip_spin.setSingleStep(0.1)
+        self.gradient_clip_spin.setValue(1.0)
+        self.gradient_clip_spin.setToolTip("Ограничивает слишком большие градиенты. Ноль выключает ограничение.")
+        self.optimizer_combo = QComboBox()
+        self.optimizer_combo.addItems(["AdamW", "Adam"])
+        self.optimizer_combo.setToolTip("Алгоритм оптимизации. AdamW обычно удобный вариант по умолчанию.")
+        self.seed_spin = QSpinBox()
+        self.seed_spin.setRange(0, 2_147_483_647)
+        self.seed_spin.setValue(42)
+        self.seed_spin.setToolTip("Начальное случайное число. При одинаковых условиях помогает повторить запуск.")
+        self.validation_spin = QSpinBox()
+        self.validation_spin.setRange(1, 30)
+        self.validation_spin.setValue(5)
+        self.validation_spin.setSuffix(" %")
+        self.validation_spin.setToolTip("Доля текстов, отложенная для проверки ошибки; она не участвует в обучении.")
+
+        self.preset_combo.currentTextChanged.connect(self._apply_model_preset)
+        for control in (self.embedding_spin, self.layers_spin, self.heads_spin):
+            control.valueChanged.connect(self._mark_custom_model_preset)
         self._add_setting(grid, 0, 0, "Где считать", self.device_combo)
-        self._add_setting(grid, 0, 1, "Размер модели", self.preset_combo)
-        self._add_setting(grid, 1, 0, "Сколько текста видеть за раз", self.context_combo)
-        self._add_setting(grid, 1, 1, "Примеров за один шаг", self.batch_combo)
-        self._add_setting(grid, 2, 0, "Размер словаря", self.vocab_combo)
-        self._add_setting(grid, 2, 1, "Потоков процессора", self.threads_spin)
-        self._add_setting(grid, 3, 0, "Сколько раз перечитать тексты", self.epochs_spin)
-        memory_hint = QLabel("Если не хватает памяти, уменьши модель, контекст или число примеров.")
+        self._add_setting(grid, 0, 1, "Готовый размер модели", self.preset_combo)
+        self._add_setting(grid, 1, 0, "Ширина модели (embedding)", self.embedding_spin)
+        self._add_setting(grid, 1, 1, "Слои трансформера", self.layers_spin)
+        self._add_setting(grid, 2, 0, "Головы внимания", self.heads_spin)
+        self._add_setting(grid, 2, 1, "Контекст, токенов", self.context_spin)
+        self._add_setting(grid, 3, 0, "Примеров за шаг (batch)", self.batch_spin)
+        self._add_setting(grid, 3, 1, "Максимум токенов словаря", self.vocab_spin)
+        self._add_setting(grid, 4, 0, "Полных проходов по текстам", self.epochs_spin)
+        self._add_setting(grid, 4, 1, "Потоков процессора", self.threads_spin)
+        self._add_setting(grid, 5, 0, "Скорость обучения", self.learning_rate_spin)
+        self._add_setting(grid, 5, 1, "Weight decay", self.weight_decay_spin)
+        self._add_setting(grid, 6, 0, "Dropout", self.dropout_spin)
+        self._add_setting(grid, 6, 1, "Ограничение градиента", self.gradient_clip_spin)
+        self._add_setting(grid, 7, 0, "Случайное зерно (seed)", self.seed_spin)
+        self._add_setting(grid, 7, 1, "Оптимизатор", self.optimizer_combo)
+        self._add_setting(grid, 8, 0, "Тексты на проверку", self.validation_spin)
+        memory_hint = QLabel(
+            "Если не хватает памяти, уменьши сначала batch, затем контекст или модель. При продолжении архитектура берётся из checkpoint."
+        )
         memory_hint.setObjectName("hint")
-        grid.addWidget(memory_hint, 3, 1)
+        memory_hint.setWordWrap(True)
+        grid.addWidget(memory_hint, 8, 1)
         layout.addWidget(settings_group)
 
         info = QLabel(
-            "Для первого запуска выбери папку с .txt и оставь модель «Маленькая». "
-            "Сейчас ИИ учится продолжать текст; понимать просьбы и команды будем учить позже. "
-            "Сначала он может ошибаться и повторяться — это нормально."
+            "Для первого запуска выбери модель «Маленькая», контекст 128–256, пакет 2–4 и 2–5 эпох. "
+            "Одна эпоха — полный проход по текстам; 10 000 эпох доступны для длинных экспериментов, но могут занять очень долго и привести к переобучению. "
+            "Сейчас модель учится продолжать текст, а не понимать команды."
         )
         info.setObjectName("notice")
         info.setWordWrap(True)
@@ -221,14 +325,21 @@ class MainWindow(QMainWindow):
         layout.addWidget(progress_group)
 
         controls = QHBoxLayout()
-        self.start_button = QPushButton("Начать обучение")
-        self.start_button.setObjectName("primaryButton")
+        self.start_button = QPushButton("Обучить с нуля")
+        self.start_button.setObjectName("secondaryButton")
         self.start_button.clicked.connect(self.start_training)
+        self.continue_button = QPushButton("Продолжить обучение")
+        self.continue_button.setObjectName("primaryButton")
+        self.continue_button.setToolTip(
+            "Загрузить сохранённые веса и продолжить на выбранной папке со старыми и новыми текстами."
+        )
+        self.continue_button.clicked.connect(self.continue_training)
         self.stop_button = QPushButton("Остановить и сохранить")
         self.stop_button.setObjectName("stopButton")
         self.stop_button.setEnabled(False)
         self.stop_button.clicked.connect(self.stop_training)
         controls.addWidget(self.start_button)
+        controls.addWidget(self.continue_button)
         controls.addWidget(self.stop_button)
         controls.addStretch(1)
         layout.addLayout(controls)
@@ -257,6 +368,24 @@ class MainWindow(QMainWindow):
         self.checkpoint_browse_button.clicked.connect(self._choose_checkpoint)
         checkpoint_form.addRow("Файл модели", checkpoint_row)
         layout.addWidget(checkpoint_group)
+
+        memory_group = QGroupBox("Загрузка модели в память")
+        memory_layout = QHBoxLayout(memory_group)
+        self.model_memory_status = QLabel("Модель не загружена в память")
+        self.model_memory_status.setObjectName("hint")
+        self.load_model_button = QPushButton("Загрузить в RAM / VRAM")
+        self.load_model_button.setObjectName("primaryButton")
+        self.load_model_button.setToolTip(
+            "Загружает модель на выбранное устройство: CPU использует системную RAM, GPU — видеопамять."
+        )
+        self.load_model_button.clicked.connect(self.load_generation_model)
+        self.unload_model_button = QPushButton("Выгрузить из памяти")
+        self.unload_model_button.setObjectName("secondaryButton")
+        self.unload_model_button.clicked.connect(self.unload_generation_model)
+        memory_layout.addWidget(self.model_memory_status, 1)
+        memory_layout.addWidget(self.load_model_button)
+        memory_layout.addWidget(self.unload_model_button)
+        layout.addWidget(memory_group)
 
         prompt_group = QGroupBox("Напиши начало фразы для модели")
         prompt_layout = QVBoxLayout(prompt_group)
@@ -319,6 +448,24 @@ class MainWindow(QMainWindow):
         layout.addWidget(text)
         layout.addWidget(widget)
         grid.addWidget(cell, row, column)
+
+    def _apply_model_preset(self, preset: str) -> None:
+        if preset == "Своя":
+            return
+        embedding_size, layers, heads = preset_values(preset)
+        blockers = [
+            QSignalBlocker(self.embedding_spin),
+            QSignalBlocker(self.layers_spin),
+            QSignalBlocker(self.heads_spin),
+        ]
+        self.embedding_spin.setValue(embedding_size)
+        self.layers_spin.setValue(layers)
+        self.heads_spin.setValue(heads)
+        del blockers
+
+    def _mark_custom_model_preset(self, _value: int) -> None:
+        if self.preset_combo.currentText() != "Своя":
+            self.preset_combo.setCurrentText("Своя")
 
     def _fill_device_options(self) -> None:
         current = self.device_combo.currentData() if hasattr(self, "device_combo") else "auto"
@@ -394,6 +541,14 @@ class MainWindow(QMainWindow):
         if directory:
             self.output_dir_edit.setText(directory)
 
+    def _choose_model_dir(self) -> None:
+        current = self.model_dir_edit.text() or str(APP_ROOT / "runs")
+        directory = QFileDialog.getExistingDirectory(
+            self, "Выбери папку запуска с latest.pt и tokenizer.json", current
+        )
+        if directory:
+            self.model_dir_edit.setText(directory)
+
     def _choose_checkpoint(self) -> None:
         current = self.checkpoint_edit.text() or str(APP_ROOT / "runs")
         filename, _ = QFileDialog.getOpenFileName(
@@ -404,17 +559,61 @@ class MainWindow(QMainWindow):
         )
         if filename:
             self.checkpoint_edit.setText(filename)
+            self.model_memory_status.setText("Файл выбран; нажми «Загрузить в RAM / VRAM».")
 
     def _append_log(self, text: str) -> None:
         self.log_view.append(text)
+        if text.startswith("Выгрузил модель генерации"):
+            self.model_memory_status.setText("Выгружена автоматически перед обучением.")
         self.log_view.verticalScrollBar().setValue(self.log_view.verticalScrollBar().maximum())
 
     def start_training(self) -> None:
+        self._launch_training(continue_from=None)
+
+    def continue_training(self) -> None:
+        model_dir_text = self.model_dir_edit.text().strip()
+        if not model_dir_text:
+            QMessageBox.warning(self, "Не выбрана модель", "Сначала выбери папку запуска с сохранённой моделью.")
+            return
+        self._launch_training(continue_from=Path(model_dir_text))
+
+    def _launch_training(self, continue_from: Path | None) -> None:
+        if continue_from is None and self.embedding_spin.value() % self.heads_spin.value() != 0:
+            QMessageBox.warning(
+                self,
+                "Несовместимые размеры модели",
+                "Ширина модели должна делиться на число голов внимания. Измени embedding или число голов.",
+            )
+            return
+        if self.epochs_spin.value() >= 1000:
+            answer = QMessageBox.question(
+                self,
+                "Очень долгий запуск",
+                f"Выбрано {self.epochs_spin.value():,} эпох. Одна эпоха — полный проход по текстам; запуск может длиться очень долго и переобучить модель. Продолжить?",
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+
         data_dir = Path(self.data_dir_edit.text())
         output_dir = Path(self.output_dir_edit.text())
         if not data_dir.is_dir():
             QMessageBox.warning(self, "Нет папки с текстами", "Выбери существующую папку с .txt-файлами.")
             return
+        if continue_from is not None:
+            if not continue_from.is_dir() or not (continue_from / "latest.pt").is_file():
+                QMessageBox.warning(
+                    self,
+                    "Не найдена модель",
+                    "В выбранной папке должен лежать файл latest.pt.",
+                )
+                return
+            if continue_from.resolve() == output_dir.resolve() or continue_from.resolve() in output_dir.resolve().parents:
+                QMessageBox.warning(
+                    self,
+                    "Выбери другую папку для результата",
+                    "Новая версия должна сохраняться отдельно от исходной модели. Выбери родительскую папку results или runs.",
+                )
+                return
         if not output_dir.exists():
             try:
                 output_dir.mkdir(parents=True, exist_ok=True)
@@ -440,11 +639,22 @@ class MainWindow(QMainWindow):
             output_dir=output_dir,
             device=str(self.device_combo.currentData()),
             preset=self.preset_combo.currentText(),
-            context_length=int(self.context_combo.currentText()),
-            batch_size=int(self.batch_combo.currentText()),
+            context_length=self.context_spin.value(),
+            batch_size=self.batch_spin.value(),
             epochs=self.epochs_spin.value(),
-            vocab_size=int(self.vocab_combo.currentText()),
+            learning_rate=self.learning_rate_spin.value(),
+            optimizer=str(self.optimizer_combo.currentText()),
+            weight_decay=self.weight_decay_spin.value(),
+            gradient_clip=self.gradient_clip_spin.value(),
+            dropout=self.dropout_spin.value(),
+            embedding_size=self.embedding_spin.value(),
+            layers=self.layers_spin.value(),
+            heads=self.heads_spin.value(),
+            vocab_size=self.vocab_spin.value(),
+            validation_percent=self.validation_spin.value(),
             cpu_threads=self.threads_spin.value(),
+            seed=self.seed_spin.value(),
+            continue_from=continue_from,
         )
         self.training_worker = TrainingWorker(config)
         self.training_worker.progress.connect(self._on_training_progress)
@@ -453,11 +663,17 @@ class MainWindow(QMainWindow):
         self.training_worker.failed.connect(self._on_training_error)
         self.training_worker.finished.connect(self._on_training_thread_finished)
         self.start_button.setEnabled(False)
+        self.continue_button.setEnabled(False)
         self.stop_button.setEnabled(True)
+        self.generate_button.setEnabled(False)
+        self.load_model_button.setEnabled(False)
+        self.unload_model_button.setEnabled(False)
         self.progress_bar.setValue(0)
         self.progress_stage.setText("Подготовка…")
         self.progress_details.setText("Проход — · шаг — · показатель ошибки —")
-        self._append_log("— Запуск нового обучения —")
+        self._append_log(
+            "— Продолжение обучения с сохранённых весов —" if continue_from else "— Запуск нового обучения —"
+        )
         self.statusBar().showMessage("Обучение запущено")
         self.training_worker.start()
 
@@ -483,6 +699,7 @@ class MainWindow(QMainWindow):
 
     def _on_training_complete(self, path: str) -> None:
         self.checkpoint_edit.setText(path)
+        self.model_memory_status.setText("Новая модель сохранена; загрузи её в память для генерации.")
         stopped = self.progress_stage.text() == "Остановлено"
         if stopped:
             self.statusBar().showMessage("Обучение остановлено; контрольная точка сохранена")
@@ -500,9 +717,65 @@ class MainWindow(QMainWindow):
         QMessageBox.critical(self, "Не удалось обучить модель", error)
 
     def _on_training_thread_finished(self) -> None:
-        self.start_button.setEnabled(True)
-        self.stop_button.setEnabled(False)
         self.training_worker = None
+        control_active = self.model_control_worker is not None
+        self.start_button.setEnabled(True)
+        self.continue_button.setEnabled(True)
+        self.stop_button.setEnabled(False)
+        self.generate_button.setEnabled(not control_active)
+        self.load_model_button.setEnabled(not control_active)
+        self.unload_model_button.setEnabled(not control_active)
+
+    def load_generation_model(self) -> None:
+        checkpoint = Path(self.checkpoint_edit.text())
+        if not checkpoint.is_file():
+            QMessageBox.warning(self, "Нет модели", "Выбери файл latest.pt или сначала обучи модель.")
+            return
+        if self.model_control_worker is not None:
+            return
+        self.model_control_worker = ModelControlWorker(
+            action="load",
+            checkpoint_path=checkpoint,
+            device_key=str(self.device_combo.currentData()),
+        )
+        self.model_control_worker.completed.connect(self._on_model_control_complete)
+        self.model_control_worker.failed.connect(self._on_model_control_error)
+        self.model_control_worker.finished.connect(self._on_model_control_finished)
+        self.load_model_button.setEnabled(False)
+        self.unload_model_button.setEnabled(False)
+        self.generate_button.setEnabled(False)
+        self.model_memory_status.setText("Загружаю модель в память; это может занять время…")
+        self.model_control_worker.start()
+
+    def unload_generation_model(self) -> None:
+        if self.model_control_worker is not None:
+            return
+        self.model_control_worker = ModelControlWorker(action="unload")
+        self.model_control_worker.completed.connect(self._on_model_control_complete)
+        self.model_control_worker.failed.connect(self._on_model_control_error)
+        self.model_control_worker.finished.connect(self._on_model_control_finished)
+        self.load_model_button.setEnabled(False)
+        self.unload_model_button.setEnabled(False)
+        self.generate_button.setEnabled(False)
+        self.model_memory_status.setText("Выгружаю модель и освобождаю память…")
+        self.model_control_worker.start()
+
+    def _on_model_control_complete(self, message: str) -> None:
+        self.model_memory_status.setText(message)
+        self._append_log(message)
+        self.statusBar().showMessage(message)
+
+    def _on_model_control_error(self, error: str) -> None:
+        self.model_memory_status.setText("Не удалось выполнить операцию с моделью.")
+        self._append_log(f"ОШИБКА загрузки модели: {error}")
+        QMessageBox.critical(self, "Ошибка работы с моделью", error)
+
+    def _on_model_control_finished(self) -> None:
+        self.model_control_worker = None
+        training_active = self.training_worker is not None
+        self.load_model_button.setEnabled(not training_active)
+        self.unload_model_button.setEnabled(not training_active)
+        self.generate_button.setEnabled(not training_active)
 
     def generate_text(self) -> None:
         checkpoint = Path(self.checkpoint_edit.text())
@@ -524,11 +797,14 @@ class MainWindow(QMainWindow):
         self.generation_worker.failed.connect(self._on_generation_error)
         self.generation_worker.finished.connect(self._on_generation_thread_finished)
         self.generate_button.setEnabled(False)
+        self.load_model_button.setEnabled(False)
+        self.unload_model_button.setEnabled(False)
         self.generated_text.setPlainText("Генерирую…")
         self.generation_worker.start()
 
     def _on_generation_complete(self, text: str) -> None:
         self.generated_text.setPlainText(text)
+        self.model_memory_status.setText("Модель загружена в память; нажми «Выгрузить» для освобождения RAM / VRAM.")
         self.statusBar().showMessage("Генерация завершена")
 
     def _on_generation_error(self, error: str) -> None:
@@ -537,8 +813,12 @@ class MainWindow(QMainWindow):
         QMessageBox.critical(self, "Ошибка генерации", error)
 
     def _on_generation_thread_finished(self) -> None:
-        self.generate_button.setEnabled(True)
         self.generation_worker = None
+        training_active = self.training_worker is not None
+        control_active = self.model_control_worker is not None
+        self.generate_button.setEnabled(not training_active and not control_active)
+        self.load_model_button.setEnabled(not training_active and not control_active)
+        self.unload_model_button.setEnabled(not training_active and not control_active)
 
     def _apply_style(self) -> None:
         self.setFont(QFont("Segoe UI", 11))
