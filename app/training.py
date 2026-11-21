@@ -39,6 +39,32 @@ def resolve_device(device_key: str) -> torch.device:
     return torch.device(device_key)
 
 
+def _probe_training_ops(model_config: ModelConfig, device: torch.device) -> None:
+    """Run one tiny forward/backward/optimizer step before choosing DirectML."""
+    probe_model = None
+    optimizer = None
+    try:
+        probe_model = TinyLanguageModel(model_config).to(device)
+        optimizer = torch.optim.AdamW(probe_model.parameters(), lr=1e-4)
+        length = min(16, model_config.context_length)
+        input_ids = torch.randint(0, model_config.vocab_size, (2, length), dtype=torch.long)
+        target_ids = torch.randint(0, model_config.vocab_size, (2, length), dtype=torch.long)
+        input_ids = input_ids.to(device)
+        target_ids = target_ids.to(device)
+        logits = probe_model(input_ids)
+        loss = F.cross_entropy(logits.reshape(-1, model_config.vocab_size), target_ids.reshape(-1))
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(probe_model.parameters(), 1.0)
+        optimizer.step()
+        float(loss.item())
+    finally:
+        del optimizer
+        del probe_model
+        import gc
+
+        gc.collect()
+
+
 def _make_starts(length: int, block_size: int) -> np.ndarray:
     count = length - block_size
     if count <= 0:
@@ -172,6 +198,18 @@ def train_model(
     if block_size < 16:
         raise ValueError("Недостаточно текста для обучения; добавь больше .txt-файлов.")
     device = resolve_device(config.device)
+    is_directml = device.type == "privateuseone" or config.device.startswith("directml:")
+    if is_directml:
+        on_message("Проверяю DirectML на коротком шаге обучения…")
+        try:
+            _probe_training_ops(model_config, device)
+            on_message("Проверка DirectML прошла. Начинаю обучение на видеокарте.")
+        except Exception as exc:
+            on_message(
+                f"DirectML не прошёл проверку ({exc}). Переключаю обучение на CPU; "
+                "текущая установка останется рабочей."
+            )
+            device = torch.device("cpu")
     on_message(f"Устройство обучения: {device}.")
     model = TinyLanguageModel(model_config).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate)
