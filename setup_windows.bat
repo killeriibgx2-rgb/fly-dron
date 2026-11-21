@@ -21,12 +21,12 @@ if not exist ".venv\Scripts\python.exe" (
 
 if not exist ".venv\Scripts\python.exe" goto :python_install_failed
 
-echo Updating pip...
-".venv\Scripts\python.exe" -m pip install --upgrade pip
+echo Checking the existing pip installation...
+".venv\Scripts\python.exe" -m pip --version
 if errorlevel 1 goto :failed
 
 echo Installing the desktop app and training libraries. This may take a while.
-".venv\Scripts\python.exe" -m pip install -r requirements.txt
+".venv\Scripts\python.exe" -m pip install --disable-pip-version-check --timeout 120 --retries 10 -r requirements.txt
 if errorlevel 1 goto :failed
 
 echo.
