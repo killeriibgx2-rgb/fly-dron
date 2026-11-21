@@ -1,10 +1,14 @@
 .venv/
-.venv-directml/
 __pycache__/
 *.py[cod]
 .pytest_cache/
 logs/
 runs/
 .token_cache/
-data/texts/*
-!data/texts/README.md
+models/*
+!models/README.md
+data/minecraft/*
+!data/minecraft/README.md
+*.safetensors
+*.gguf
+adapter_model*
