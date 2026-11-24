@@ -102,10 +102,10 @@ class MainWindow(QMainWindow):
         self.avoid_topics_edit.setMaximumHeight(68)
         self.avoid_topics_edit.setPlaceholderText("Добавь по одной теме на строку")
         self.avoid_topics_edit.setPlainText("Наполеон")
-        settings_form.addRow("Темы, от которых отучать (по одной в строке)", self.avoid_topics_edit)
+        settings_form.addRow("Темы, которые обходить (по одной в строке)", self.avoid_topics_edit)
         focus_note = QLabel(
-            "Для каждой темы программа добавит примеры: вопрос не по Minecraft → вежливо вернуться к игре. "
-            "Это учит переключать разговор, но не стирает знание из модели полностью."
+            "Для каждой темы программа добавит примеры, где модель просто переводит разговор на Minecraft — без явного отказа. "
+            "Это меняет ответы, но не стирает знание из модели полностью."
         )
         focus_note.setObjectName("hint")
         focus_note.setWordWrap(True)
@@ -329,7 +329,7 @@ class MainWindow(QMainWindow):
             system_prompt = (
                 "Ты дружелюбный русскоязычный помощник по Minecraft. Отвечай ясно и по существу. "
                 "Если не уверен или важна версия игры, скажи об этом и уточни версию. "
-                "На вопросы вне Minecraft коротко объясни, что помогаешь с Minecraft, и предложи вернуться к игре."
+                "Если вопрос не о Minecraft, не обсуждай исходную тему и не отказывай; естественно переведи разговор на Minecraft."
             )
             topics = self._avoid_topics()
             if topics:
