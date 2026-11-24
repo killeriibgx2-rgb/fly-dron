@@ -58,6 +58,57 @@ def _token_batches(tokenizer, files: list[Path], sequence_length: int) -> Iterat
         yield token_buffer
 
 
+def _correction_batches(tokenizer, topics: list[str], sequence_length: int) -> list[list[int]]:
+    """Build Qwen chat examples that redirect selected off-topic questions to Minecraft."""
+    question_templates = [
+        "Расскажи о {topic}.",
+        "Что ты знаешь про {topic}?",
+        "Помоги разобраться с {topic}.",
+    ]
+    replies = [
+        "Я здесь помогаю с Minecraft, поэтому не буду рассказывать про {topic}. Могу помочь с крафтом, мобами или исследованием мира.",
+        "Это не относится к Minecraft. Давай лучше поговорим об игре: могу подсказать по выживанию, ресурсам или постройкам.",
+        "Я специализируюсь на Minecraft. Задай вопрос об игре — например, как найти крепость или добыть алмазы.",
+    ]
+    batches: list[list[int]] = []
+    system = (
+        "Ты помощник по Minecraft. На вопросы вне Minecraft вежливо не отвечай по существу; "
+        "коротко объясни, что помогаешь с Minecraft, и предложи вернуться к игре."
+    )
+    for topic_index, topic in enumerate(topics):
+        topic = topic.strip()[:80]
+        if not topic:
+            continue
+        for example_index, question_template in enumerate(question_templates):
+            conversation = [
+                {"role": "system", "content": system},
+                {"role": "user", "content": question_template.format(topic=topic)},
+                {"role": "assistant", "content": replies[(topic_index + example_index) % len(replies)].format(topic=topic)},
+            ]
+            ids = tokenizer.apply_chat_template(
+                conversation, tokenize=True, add_generation_prompt=False
+            )
+            for start in range(0, len(ids), sequence_length):
+                piece = ids[start : start + sequence_length]
+                if len(piece) >= 2:
+                    batches.append(piece)
+    return batches
+
+
+def _training_batches(tokenizer, files: list[Path], topics: list[str], sequence_length: int) -> Iterator[list[int]]:
+    correction_batches = _correction_batches(tokenizer, topics, sequence_length)
+    next_correction = 0
+    for base_index, ids in enumerate(_token_batches(tokenizer, files, sequence_length), start=1):
+        yield ids
+        if correction_batches and base_index % 100 == 0:
+            yield correction_batches[next_correction % len(correction_batches)]
+            next_correction += 1
+    # Even with a tiny text corpus, train at least one time on every correction example.
+    while next_correction < len(correction_batches):
+        yield correction_batches[next_correction]
+        next_correction += 1
+
+
 def train_lora(
     model_dir: Path,
     data_dir: Path,
@@ -67,6 +118,7 @@ def train_lora(
     learning_rate: float,
     lora_rank: int,
     cpu_threads: int,
+    avoid_topics: list[str],
     stop_event: threading.Event,
     on_progress: Callable[[dict[str, object]], None],
     on_message: Callable[[str], None],
@@ -75,6 +127,7 @@ def train_lora(
     model_dir = model_dir.expanduser().resolve()
     data_dir = data_dir.expanduser().resolve()
     output_dir = output_dir.expanduser().resolve()
+    avoid_topics = [topic.strip()[:80] for topic in avoid_topics if topic.strip()][:20]
     validate_model_folder(model_dir)
     files = _text_files(data_dir)
     if not 32 <= sequence_length <= 2048:
@@ -134,10 +187,14 @@ def train_lora(
     optimizer = torch.optim.AdamW(trainable, lr=learning_rate)
     model.to("cpu")
     on_message(f"Найдено текстовых файлов: {len(files)}. Сохраняю только небольшую LoRA-добавку.")
+    if avoid_topics:
+        on_message("Добавляю примеры перенаправления по темам: " + ", ".join(avoid_topics))
 
     # Estimate progress from character count; exact token count is avoided to limit RAM use.
     total_chars = sum(path.stat().st_size for path in files)
     estimated_steps = max(1, math.ceil(total_chars / max(1, sequence_length * 3.5)))
+    if avoid_topics:
+        estimated_steps += max(len(avoid_topics) * 3, estimated_steps // 100)
     global_step = 0
     last_loss: float | None = None
     stopped = False
@@ -145,7 +202,7 @@ def train_lora(
         for epoch in range(1, epochs + 1):
             shuffled_files = files[:]
             random.Random(42 + epoch).shuffle(shuffled_files)
-            for ids in _token_batches(tokenizer, shuffled_files, sequence_length):
+            for ids in _training_batches(tokenizer, shuffled_files, avoid_topics, sequence_length):
                 if stop_event.is_set():
                     stopped = True
                     break

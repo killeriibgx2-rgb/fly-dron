@@ -98,6 +98,18 @@ class MainWindow(QMainWindow):
         settings_form.addRow("Скорость обучения", self.learning_rate_spin)
         settings_form.addRow("Размер LoRA", self.rank_spin)
         settings_form.addRow("Потоков процессора", self.threads_spin)
+        self.avoid_topics_edit = QTextEdit()
+        self.avoid_topics_edit.setMaximumHeight(68)
+        self.avoid_topics_edit.setPlaceholderText("Добавь по одной теме на строку")
+        self.avoid_topics_edit.setPlainText("Наполеон")
+        settings_form.addRow("Темы, от которых отучать (по одной в строке)", self.avoid_topics_edit)
+        focus_note = QLabel(
+            "Для каждой темы программа добавит примеры: вопрос не по Minecraft → вежливо вернуться к игре. "
+            "Это учит переключать разговор, но не стирает знание из модели полностью."
+        )
+        focus_note.setObjectName("hint")
+        focus_note.setWordWrap(True)
+        settings_form.addRow(focus_note)
         cpu_note = QLabel(
             "Для первого раза оставь значения как есть. Обучение идёт на процессоре: RX 580 не используется, "
             "поэтому процесс может быть долгим. Исходные веса Qwen не меняются."
@@ -192,6 +204,17 @@ class MainWindow(QMainWindow):
         if selected:
             edit.setText(selected)
 
+    def _avoid_topics(self) -> list[str]:
+        lines = [line.strip()[:80] for line in self.avoid_topics_edit.toPlainText().splitlines() if line.strip()]
+        unique: list[str] = []
+        seen: set[str] = set()
+        for topic in lines:
+            key = topic.casefold()
+            if key not in seen:
+                seen.add(key)
+                unique.append(topic)
+        return unique[:20]
+
     def start_training(self) -> None:
         if self.training_worker is not None or self.chat_worker is not None:
             return
@@ -229,6 +252,7 @@ class MainWindow(QMainWindow):
             learning_rate=self.learning_rate_spin.value(),
             lora_rank=self.rank_spin.value(),
             cpu_threads=self.threads_spin.value(),
+            avoid_topics=self._avoid_topics(),
         )
         self.training_worker.progress.connect(self.on_training_progress)
         self.training_worker.message.connect(self.append_log)
@@ -302,11 +326,15 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Сначала обучи Qwen", "Сначала нажми «Дообучить Qwen» или выбери папку адаптера.")
             return
         if not self.messages:
-            self.messages.append({
-                "role": "system",
-                "content": "Ты дружелюбный русскоязычный помощник по Minecraft. Отвечай ясно и по существу. "
-                           "Если не уверен или важна версия игры, скажи об этом и уточни версию."
-            })
+            system_prompt = (
+                "Ты дружелюбный русскоязычный помощник по Minecraft. Отвечай ясно и по существу. "
+                "Если не уверен или важна версия игры, скажи об этом и уточни версию. "
+                "На вопросы вне Minecraft коротко объясни, что помогаешь с Minecraft, и предложи вернуться к игре."
+            )
+            topics = self._avoid_topics()
+            if topics:
+                system_prompt += " Не углубляйся в эти темы: " + ", ".join(topics) + "."
+            self.messages.append({"role": "system", "content": system_prompt})
         self.messages.append({"role": "user", "content": question})
         self.chat_view.append(f"Ты: {question}")
         self.chat_input.clear()

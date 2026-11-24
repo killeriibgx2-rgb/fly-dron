@@ -26,11 +26,12 @@ class QwenTrainingWorker(QThread):
         learning_rate: float,
         lora_rank: int,
         cpu_threads: int,
+        avoid_topics: list[str],
     ) -> None:
         super().__init__()
         self.args = (
             model_dir, data_dir, output_dir, sequence_length, epochs,
-            learning_rate, lora_rank, cpu_threads,
+            learning_rate, lora_rank, cpu_threads, avoid_topics,
         )
         self.stop_event = threading.Event()
 
@@ -39,10 +40,10 @@ class QwenTrainingWorker(QThread):
 
     def run(self) -> None:
         try:
-            model_dir, data_dir, output_dir, sequence_length, epochs, learning_rate, lora_rank, cpu_threads = self.args
+            model_dir, data_dir, output_dir, sequence_length, epochs, learning_rate, lora_rank, cpu_threads, avoid_topics = self.args
             result = train_lora(
                 model_dir, data_dir, output_dir, sequence_length, epochs,
-                learning_rate, lora_rank, cpu_threads, self.stop_event,
+                learning_rate, lora_rank, cpu_threads, avoid_topics, self.stop_event,
                 self.progress.emit, self.message.emit,
             )
             self.completed.emit(str(result))
