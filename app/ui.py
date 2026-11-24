@@ -55,8 +55,8 @@ class MainWindow(QMainWindow):
         title.setObjectName("title")
         root.addWidget(title)
         intro = QLabel(
-            "Укажи, где лежат скачанные файлы Qwen и твои Minecraft-тексты. "
-            "Программа сохранит отдельную дообученную добавку (LoRA), а затем даст пообщаться с моделью."
+            "Укажи исходную Qwen и Minecraft-тексты для сохранения. Если подготовишь отдельные примеры, "
+            "можно включить экспериментальное ослабление их влияния на обучаемые веса."
         )
         intro.setObjectName("notice")
         intro.setWordWrap(True)
@@ -68,8 +68,26 @@ class MainWindow(QMainWindow):
         self.data_dir_edit = self._path_field(DEFAULT_DATA_DIR)
         self.output_dir_edit = self._path_field(DEFAULT_OUTPUT_DIR)
         self._add_folder_row(form, "Папка с Qwen-файлами", self.model_dir_edit, "Выбрать папку модели")
-        self._add_folder_row(form, "Папка с Minecraft .txt", self.data_dir_edit, "Выбрать папку текстов")
+        self._add_folder_row(form, "Minecraft .txt — что сохранить", self.data_dir_edit, "Выбрать папку Minecraft")
         self._add_folder_row(form, "Куда сохранять результат", self.output_dir_edit, "Выбрать папку результата")
+        self.forget_dir_edit = QLineEdit()
+        self.forget_dir_edit.setReadOnly(True)
+        self.forget_dir_edit.setPlaceholderText("Необязательно: выбери .txt с фактами, которые нужно забыть")
+        forget_row = QWidget()
+        forget_layout = QHBoxLayout(forget_row)
+        forget_layout.setContentsMargins(0, 0, 0, 0)
+        choose_forget_button = QPushButton("Выбрать папку для забывания")
+        choose_forget_button.setObjectName("secondaryButton")
+        choose_forget_button.clicked.connect(
+            lambda: self.choose_folder(self.forget_dir_edit, "Выбери папку с примерами, которые нужно забыть")
+        )
+        clear_forget_button = QPushButton("Очистить")
+        clear_forget_button.setObjectName("secondaryButton")
+        clear_forget_button.clicked.connect(self.forget_dir_edit.clear)
+        forget_layout.addWidget(self.forget_dir_edit, 1)
+        forget_layout.addWidget(choose_forget_button)
+        forget_layout.addWidget(clear_forget_button)
+        form.addRow("Необязательно: забыть эти .txt", forget_row)
         root.addWidget(paths)
 
         settings = QGroupBox("2. Настройки обучения")
@@ -98,21 +116,16 @@ class MainWindow(QMainWindow):
         settings_form.addRow("Скорость обучения", self.learning_rate_spin)
         settings_form.addRow("Размер LoRA", self.rank_spin)
         settings_form.addRow("Потоков процессора", self.threads_spin)
-        self.avoid_topics_edit = QTextEdit()
-        self.avoid_topics_edit.setMaximumHeight(68)
-        self.avoid_topics_edit.setPlaceholderText("Добавь по одной теме на строку")
-        self.avoid_topics_edit.setPlainText("Наполеон")
-        settings_form.addRow("Темы, которые обходить (по одной в строке)", self.avoid_topics_edit)
-        focus_note = QLabel(
-            "Для каждой темы программа добавит примеры, где модель просто переводит разговор на Minecraft — без явного отказа. "
-            "Это меняет ответы, но не стирает знание из модели полностью."
+        unlearn_note = QLabel(
+            "В режиме забывания программа меняет LoRA-веса: старается снизить вероятность выбранных текстов, "
+            "не теряя Minecraft-набор. Это эксперимент, не гарантированное стирание всей темы."
         )
-        focus_note.setObjectName("hint")
-        focus_note.setWordWrap(True)
-        settings_form.addRow(focus_note)
+        unlearn_note.setObjectName("hint")
+        unlearn_note.setWordWrap(True)
+        settings_form.addRow(unlearn_note)
         cpu_note = QLabel(
             "Для первого раза оставь значения как есть. Обучение идёт на процессоре: RX 580 не используется, "
-            "поэтому процесс может быть долгим. Исходные веса Qwen не меняются."
+            "поэтому процесс может быть долгим. Меняется отдельная LoRA-добавка; исходные файлы Qwen остаются целыми."
         )
         cpu_note.setObjectName("hint")
         cpu_note.setWordWrap(True)
@@ -200,20 +213,10 @@ class MainWindow(QMainWindow):
         form.addRow(label, row)
 
     def choose_folder(self, edit: QLineEdit, title: str) -> None:
-        selected = QFileDialog.getExistingDirectory(self, title, edit.text())
+        start_dir = edit.text() or str(APP_ROOT / "data" / "to_forget")
+        selected = QFileDialog.getExistingDirectory(self, title, start_dir)
         if selected:
             edit.setText(selected)
-
-    def _avoid_topics(self) -> list[str]:
-        lines = [line.strip()[:80] for line in self.avoid_topics_edit.toPlainText().splitlines() if line.strip()]
-        unique: list[str] = []
-        seen: set[str] = set()
-        for topic in lines:
-            key = topic.casefold()
-            if key not in seen:
-                seen.add(key)
-                unique.append(topic)
-        return unique[:20]
 
     def start_training(self) -> None:
         if self.training_worker is not None or self.chat_worker is not None:
@@ -221,24 +224,41 @@ class MainWindow(QMainWindow):
         model_dir = Path(self.model_dir_edit.text()).expanduser()
         data_dir = Path(self.data_dir_edit.text()).expanduser()
         output_dir = Path(self.output_dir_edit.text()).expanduser()
+        forget_dir_text = self.forget_dir_edit.text().strip()
+        forget_dir = Path(forget_dir_text).expanduser() if forget_dir_text else None
+        forget_files: list[Path] = []
         try:
             validate_model_folder(model_dir)
             if not data_dir.is_dir():
                 raise FileNotFoundError("Не найдена папка с Minecraft-текстами.")
             text_files = _text_files(data_dir)
-            if model_dir.resolve() == output_dir.resolve() or model_dir.resolve() in output_dir.resolve().parents:
-                raise ValueError("Папку результата выбери отдельно от папки Qwen.")
-            if data_dir.resolve() == output_dir.resolve() or data_dir.resolve() in output_dir.resolve().parents:
-                raise ValueError("Папку результата выбери отдельно от папки текстов.")
+            if forget_dir is not None:
+                if not forget_dir.is_dir():
+                    raise FileNotFoundError("Не найдена папка с текстами для забывания.")
+                forget_files = _text_files(forget_dir)
+                if forget_dir.resolve() == data_dir.resolve() or forget_dir.resolve() in data_dir.resolve().parents or data_dir.resolve() in forget_dir.resolve().parents:
+                    raise ValueError("Папки Minecraft-текстов и текстов для забывания должны быть разными.")
+                if forget_dir.resolve() == model_dir.resolve() or forget_dir.resolve() in model_dir.resolve().parents or model_dir.resolve() in forget_dir.resolve().parents:
+                    raise ValueError("Папка для забывания должна быть отдельно от файлов Qwen.")
+            sources = [model_dir.resolve(), data_dir.resolve()]
+            if forget_dir is not None:
+                sources.append(forget_dir.resolve())
+            if any(output_dir.resolve() == source or source in output_dir.resolve().parents for source in sources):
+                raise ValueError("Папку результата выбери отдельно от модели и обеих папок с текстами.")
         except Exception as exc:
             QMessageBox.warning(self, "Проверь папки", str(exc))
             return
 
         size_mb = sum(path.stat().st_size for path in text_files) / (1024 * 1024)
+        forget_summary = (
+            f" Будет попытка забыть примеры из {len(forget_files)} файлов, сохраняя Minecraft-набор."
+            if forget_files else " Обычное дообучение без режима забывания."
+        )
         confirmation = QMessageBox.question(
             self,
-            "Начать дообучение?",
-            f"Найдено файлов: {len(text_files)} ({size_mb:.1f} МБ). Обучение идёт на CPU и может занять много времени. Продолжить?",
+            "Начать обучение весов?",
+            f"Minecraft-файлов: {len(text_files)} ({size_mb:.1f} МБ).{forget_summary} "
+            "Это экспериментально, исходная модель не перезаписывается, обучение идёт на CPU. Продолжить?",
         )
         if confirmation != QMessageBox.StandardButton.Yes:
             return
@@ -252,7 +272,7 @@ class MainWindow(QMainWindow):
             learning_rate=self.learning_rate_spin.value(),
             lora_rank=self.rank_spin.value(),
             cpu_threads=self.threads_spin.value(),
-            avoid_topics=self._avoid_topics(),
+            forget_dir=forget_dir,
         )
         self.training_worker.progress.connect(self.on_training_progress)
         self.training_worker.message.connect(self.append_log)
@@ -282,7 +302,10 @@ class MainWindow(QMainWindow):
         label = str(data.get("message", "Обучение Qwen"))
         loss = data.get("train_loss")
         if isinstance(loss, (int, float)):
-            label += f" · ошибка {float(loss):.4f} · шаг {data.get('step', 0)}"
+            label += f" · Minecraft {float(loss):.4f} · шаг {data.get('step', 0)}"
+        forget_loss = data.get("forget_loss")
+        if isinstance(forget_loss, (int, float)):
+            label += f" · текст для забывания {float(forget_loss):.4f}"
         self.progress_label.setText(label)
 
     def on_training_complete(self, adapter_dir: str) -> None:
@@ -326,15 +349,11 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Сначала обучи Qwen", "Сначала нажми «Дообучить Qwen» или выбери папку адаптера.")
             return
         if not self.messages:
-            system_prompt = (
-                "Ты дружелюбный русскоязычный помощник по Minecraft. Отвечай ясно и по существу. "
-                "Если не уверен или важна версия игры, скажи об этом и уточни версию. "
-                "Если вопрос не о Minecraft, не обсуждай исходную тему и не отказывай; естественно переведи разговор на Minecraft."
-            )
-            topics = self._avoid_topics()
-            if topics:
-                system_prompt += " Не углубляйся в эти темы: " + ", ".join(topics) + "."
-            self.messages.append({"role": "system", "content": system_prompt})
+            self.messages.append({
+                "role": "system",
+                "content": "Ты дружелюбный русскоязычный помощник по Minecraft. Отвечай ясно и по существу. "
+                           "Если не уверен или важна версия игры, скажи об этом и уточни версию."
+            })
         self.messages.append({"role": "user", "content": question})
         self.chat_view.append(f"Ты: {question}")
         self.chat_input.clear()

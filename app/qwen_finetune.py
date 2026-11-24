@@ -58,58 +58,6 @@ def _token_batches(tokenizer, files: list[Path], sequence_length: int) -> Iterat
         yield token_buffer
 
 
-def _correction_batches(tokenizer, topics: list[str], sequence_length: int) -> list[list[int]]:
-    """Build Qwen chat examples that redirect selected off-topic questions to Minecraft."""
-    question_templates = [
-        "Расскажи о {topic}.",
-        "Что ты знаешь про {topic}?",
-        "Помоги разобраться с {topic}.",
-    ]
-    replies = [
-        "Кстати, в Minecraft можно построить огромный замок. Хочешь, подскажу, с чего начать?",
-        "В Minecraft тоже есть простор для больших приключений. Могу подсказать, как подготовиться к походу в Нижний мир.",
-        "Давай лучше придумаем постройку для Minecraft — например, крепость или целую деревню. Что тебе интереснее?",
-    ]
-    batches: list[list[int]] = []
-    system = (
-        "Ты помощник по Minecraft. Если вопрос не о Minecraft, не обсуждай исходную тему и не говори, "
-        "что не можешь или не будешь отвечать. Естественно переключи разговор на Minecraft, "
-        "не повторяя исходную тему."
-    )
-    for topic_index, topic in enumerate(topics):
-        topic = topic.strip()[:80]
-        if not topic:
-            continue
-        for example_index, question_template in enumerate(question_templates):
-            conversation = [
-                {"role": "system", "content": system},
-                {"role": "user", "content": question_template.format(topic=topic)},
-                {"role": "assistant", "content": replies[(topic_index + example_index) % len(replies)].format(topic=topic)},
-            ]
-            ids = tokenizer.apply_chat_template(
-                conversation, tokenize=True, add_generation_prompt=False
-            )
-            for start in range(0, len(ids), sequence_length):
-                piece = ids[start : start + sequence_length]
-                if len(piece) >= 2:
-                    batches.append(piece)
-    return batches
-
-
-def _training_batches(tokenizer, files: list[Path], topics: list[str], sequence_length: int) -> Iterator[list[int]]:
-    correction_batches = _correction_batches(tokenizer, topics, sequence_length)
-    next_correction = 0
-    for base_index, ids in enumerate(_token_batches(tokenizer, files, sequence_length), start=1):
-        yield ids
-        if correction_batches and base_index % 100 == 0:
-            yield correction_batches[next_correction % len(correction_batches)]
-            next_correction += 1
-    # Even with a tiny text corpus, train at least one time on every correction example.
-    while next_correction < len(correction_batches):
-        yield correction_batches[next_correction]
-        next_correction += 1
-
-
 def train_lora(
     model_dir: Path,
     data_dir: Path,
@@ -119,7 +67,7 @@ def train_lora(
     learning_rate: float,
     lora_rank: int,
     cpu_threads: int,
-    avoid_topics: list[str],
+    forget_dir: Path | None,
     stop_event: threading.Event,
     on_progress: Callable[[dict[str, object]], None],
     on_message: Callable[[str], None],
@@ -128,15 +76,19 @@ def train_lora(
     model_dir = model_dir.expanduser().resolve()
     data_dir = data_dir.expanduser().resolve()
     output_dir = output_dir.expanduser().resolve()
-    avoid_topics = [topic.strip()[:80] for topic in avoid_topics if topic.strip()][:20]
+    forget_dir = forget_dir.expanduser().resolve() if forget_dir else None
     validate_model_folder(model_dir)
     files = _text_files(data_dir)
+    forget_files = _text_files(forget_dir) if forget_dir else []
+    if forget_dir and (forget_dir == data_dir or forget_dir in data_dir.parents or data_dir in forget_dir.parents):
+        raise ValueError("Папки для сохранения Minecraft и для забывания должны быть раздельными.")
     if not 32 <= sequence_length <= 2048:
         raise ValueError("Длина примера должна быть от 32 до 2048 токенов.")
     if epochs < 1 or learning_rate <= 0 or lora_rank < 1:
         raise ValueError("Проверь число эпох, скорость обучения и размер LoRA.")
-    if output_dir == model_dir or model_dir in output_dir.parents:
-        raise ValueError("Папка результата должна быть отдельной от папки исходных весов.")
+    source_dirs = [model_dir, data_dir] + ([forget_dir] if forget_dir else [])
+    if any(output_dir == source or source in output_dir.parents for source in source_dirs):
+        raise ValueError("Папка результата должна быть отдельно от модели и обеих папок с текстами.")
 
     _clear_chat_cache()
 
@@ -187,34 +139,57 @@ def train_lora(
         raise RuntimeError("Не удалось найти веса LoRA для обучения.")
     optimizer = torch.optim.AdamW(trainable, lr=learning_rate)
     model.to("cpu")
-    on_message(f"Найдено текстовых файлов: {len(files)}. Сохраняю только небольшую LoRA-добавку.")
-    if avoid_topics:
-        on_message("Добавляю примеры перенаправления по темам: " + ", ".join(avoid_topics))
+    on_message(f"Minecraft-текстов: {len(files)}. Обучаемые веса сохраняются отдельным LoRA-адаптером.")
+    if forget_files:
+        on_message(f"Текстов для экспериментального забывания: {len(forget_files)}. "
+                   "Исходный файл Qwen останется нетронутым.")
 
-    # Estimate progress from character count; exact token count is avoided to limit RAM use.
+    # Estimate progress from retained text size; exact token count is avoided to limit RAM use.
     total_chars = sum(path.stat().st_size for path in files)
     estimated_steps = max(1, math.ceil(total_chars / max(1, sequence_length * 3.5)))
-    if avoid_topics:
-        estimated_steps += max(len(avoid_topics) * 3, estimated_steps // 100)
     global_step = 0
     last_loss: float | None = None
     stopped = False
     try:
+        forget_strength = 0.1
         for epoch in range(1, epochs + 1):
             shuffled_files = files[:]
             random.Random(42 + epoch).shuffle(shuffled_files)
-            for ids in _training_batches(tokenizer, shuffled_files, avoid_topics, sequence_length):
+            forget_iterator = iter(_token_batches(tokenizer, forget_files, sequence_length)) if forget_files else None
+            next_forget_batch: list[int] | None = None
+            if forget_iterator is not None:
+                try:
+                    next_forget_batch = next(forget_iterator)
+                except StopIteration as exc:
+                    raise ValueError("В выбранных файлах для забывания слишком мало текста.") from exc
+
+            for ids in _token_batches(tokenizer, shuffled_files, sequence_length):
                 if stop_event.is_set():
                     stopped = True
                     break
-                inputs = torch.tensor([ids], dtype=torch.long)
+                keep_inputs = torch.tensor([ids], dtype=torch.long)
                 optimizer.zero_grad(set_to_none=True)
-                output = model(input_ids=inputs, labels=inputs, use_cache=False)
-                loss = output.loss
-                loss.backward()
+                keep_output = model(input_ids=keep_inputs, labels=keep_inputs, use_cache=False)
+                total_loss = keep_output.loss
+                forget_loss_value: float | None = None
+                if next_forget_batch is not None and forget_iterator is not None:
+                    forget_inputs = torch.tensor([next_forget_batch], dtype=torch.long)
+                    forget_output = model(input_ids=forget_inputs, labels=forget_inputs, use_cache=False)
+                    # Minimize loss on Minecraft examples while maximizing it on selected forget examples.
+                    total_loss = total_loss - forget_strength * forget_output.loss
+                    forget_loss_value = float(forget_output.loss.detach().item())
+                    try:
+                        next_forget_batch = next(forget_iterator)
+                    except StopIteration:
+                        forget_iterator = iter(_token_batches(tokenizer, forget_files, sequence_length))
+                        try:
+                            next_forget_batch = next(forget_iterator)
+                        except StopIteration as exc:
+                            raise ValueError("В выбранных файлах для забывания слишком мало текста.") from exc
+                total_loss.backward()
                 torch.nn.utils.clip_grad_norm_(trainable, 1.0)
                 optimizer.step()
-                last_loss = float(loss.detach().item())
+                last_loss = float(keep_output.loss.detach().item())
                 global_step += 1
                 if global_step % 5 == 0 or global_step == 1:
                     on_progress({
@@ -224,6 +199,7 @@ def train_lora(
                         "steps_per_epoch": estimated_steps,
                         "percent": min(99, int(global_step * 100 / (estimated_steps * epochs))),
                         "train_loss": last_loss,
+                        "forget_loss": forget_loss_value,
                         "message": f"Обучение LoRA · эпоха {epoch}/{epochs}",
                     })
             _save_adapter(model, tokenizer, run_dir, model_dir)

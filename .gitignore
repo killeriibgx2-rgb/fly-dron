@@ -9,6 +9,8 @@ models/*
 !models/README.md
 data/minecraft/*
 !data/minecraft/README.md
+data/to_forget/*
+!data/to_forget/README.md
 *.safetensors
 *.gguf
 adapter_model*
